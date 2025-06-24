@@ -1,0 +1,60 @@
+name: Atualiza Jurimetria TJCE → GPT
+
+on:
+  schedule:
+    - cron: '0 3 * * *'   # executa diariamente às 03h UTC
+  workflow_dispatch:      # botão Run workflow
+
+jobs:
+  build-upload:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Clona o repositório
+      - uses: actions/checkout@v4
+
+      # Instala dependências Python
+      - name: Instalando dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Executa o scraper e-SAJ (decisões)
+      - name: Executa conector ESAJ
+        env:
+          DATAJUD_TOKEN: ${{ secrets.DATAJUD_TOKEN }}
+        run: |
+          python esaj_datajud_connector.py \
+            --classe "Apelação Cível" \
+            --data-inicio $(date -d "365 days ago" +%F) \
+            --data-fim $(date +%F) \
+            --save artifacts/esaj_decisoes_latest.json
+
+      # Executa a coleta DataJud (estatísticas)
+      - name: Executa conector DataJud
+        env:
+          DATAJUD_TOKEN: ${{ secrets.DATAJUD_TOKEN }}
+        run: |
+          python esaj_datajud_connector.py \
+            --estatisticas --classe "Apelação Cível" \
+            --ano $(date +%Y) \
+            --save artifacts/datajud_stats_latest.json
+
+      # Envia os JSONs ao projeto GPT (DELETE antigo + POST novo)
+      - name: Upload para GPT
+        env:
+          GPT_PROJECT_TOKEN: ${{ secrets.GPT_PROJECT_TOKEN }}
+        run: |
+          API=\"https://plataforma.ai/api/v1/projects/SEU_ID/files\"
+
+          for f in esaj_decisoes_latest.json datajud_stats_latest.json; do
+            # Remove versão antiga (ignora erro se não existir)
+            curl -s -X DELETE \"$API/$f\" \
+                 -H \"Authorization: Bearer $GPT_PROJECT_TOKEN\" || true
+
+            # Faz upload da nova versão
+            curl -s -X POST \"$API\" \
+                 -H \"Authorization: Bearer $GPT_PROJECT_TOKEN\" \
+                 -F \"file=@artifacts/$f\" \
+                 || exit 1
+          done
