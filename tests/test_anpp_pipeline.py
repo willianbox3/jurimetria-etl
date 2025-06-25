@@ -19,8 +19,13 @@ import sys
 sys.path.append(str(Path(__file__).resolve().parents[1] / "src"))
 
 from jurimetria_pipeline import (
-    tz_utc_to_sp, lista_assuntos, lista_movimentos,
-    build_dataframe, main
+    tz_utc_to_sp,
+    lista_assuntos,
+    lista_movimentos,
+    build_dataframe,
+    build_base_url,
+    DEFAULT_TRIBUNAIS,
+    main,
 )
 
 matplotlib.use("Agg")   # evita abrir janelas gráficas em CI
@@ -46,6 +51,16 @@ class TestHelpers(unittest.TestCase):
         ]
         order = [r[0] for r in lista_movimentos(raw)]
         self.assertEqual(order, [2, 1])
+
+    def test_build_base_url(self):
+        url = build_base_url("TJSP")
+        expected = (
+            "https://api-publica.datajud.cnj.jus.br/api_publica_tjsp/_search"
+        )
+        self.assertEqual(url, expected)
+
+    def test_default_tribunais(self):
+        self.assertEqual(DEFAULT_TRIBUNAIS, ["TJCE"])
 
 
 class TestMain(unittest.TestCase):
