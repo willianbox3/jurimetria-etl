@@ -1,0 +1,61 @@
+name: Jurimetria ETL
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  # 1) Job de Testes
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run pytest
+        run: pytest -q
+
+  # 2) Job ETL (depende de test)
+  etl:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run jurimetria pipeline
+        env:
+          CNJ_API_KEY: ${{ secrets.CNJ_API_KEY }}
+        run: |
+          python src/jurimetria_pipeline.py \
+            --tribunais TJCE \
+            --de 2023-01-01 \
+            --ate 2023-01-31 \
+            --max-processos 100
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: dados-jurimetria
+          path: |
+            dados_jurimetria/jurimetria.csv
+            dados_jurimetria/jurimetria.parquet
+            dados_jurimetria/horario_jurimetria.jpg
