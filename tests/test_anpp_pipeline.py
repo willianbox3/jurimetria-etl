@@ -14,11 +14,11 @@ from unittest import mock
 import pandas as pd
 import matplotlib
 
-# Permite importar src/anpp_pipeline.py sem instalar como pacote
+# Permite importar src/jurimetria_pipeline.py sem instalar como pacote
 import sys
 sys.path.append(str(Path(__file__).resolve().parents[1] / "src"))
 
-from anpp_pipeline import (
+from jurimetria_pipeline import (
     tz_utc_to_sp, lista_assuntos, lista_movimentos,
     build_dataframe, main
 )
@@ -78,7 +78,7 @@ class TestMain(unittest.TestCase):
             "sort": [123]
         }
 
-        with mock.patch("anpp_pipeline.fetch_raw_hits", return_value=[sample_hit]):
+        with mock.patch("jurimetria_pipeline.fetch_raw_hits", return_value=[sample_hit]):
             df = build_dataframe()
             self.assertEqual(len(df), 1)
             self.assertIn("numero_processo", df.columns)
