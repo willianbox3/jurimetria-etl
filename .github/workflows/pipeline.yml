@@ -1,60 +1,25 @@
-name: Atualiza Jurimetria → GPT
+name: Testes
 
 on:
-  # roda todos os dias às 03 h UTC (00 h BRT)
-  schedule:
-    - cron: '0 3 * * *'
-  # permite disparo manual pelo botão *Run workflow*
-  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
 
 jobs:
-  build-upload:
+  test:
     runs-on: ubuntu-latest
 
-    # 🔑 injeta as chaves de API definidas em Settings → Secrets → Actions
-    env:
-      CNJ_API_KEY:   ${{ secrets.CNJ_API_KEY   }}
-      DATAJUD_TOKEN: ${{ secrets.DATAJUD_TOKEN }}
-
     steps:
-      # Clona o repositório
       - uses: actions/checkout@v4
 
-      # Prepara Python 3.11 com cache de dependências
-      - name: Configura Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
 
-      # Instala pacotes
-      - name: Instala dependências
+      - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # ——————————————————————————————————————————————
-      #  Conectores legado  (TJCE · e-SAJ / DataJud)
-      # ——————————————————————————————————————————————
-
-      - name: Executa conector ESAJ (TJCE)
-        run: |
-          python legacy/legacy_datajud_connector.py esaj \
-            --classe "Apelação Cível" \
-            --data-inicio "$(date -d '365 days ago' +%F)" \
-            --data-fim   "$(date +%F)" \
-            --save       artifacts/esaj_decisoes_latest.json
-
-      - name: Executa conector DataJud (TJCE)
-        run: |
-          python legacy/legacy_datajud_connector.py datajud \
-            --classe "Apelação Cível" \
-            --ano   "$(date +%Y)" \
-            --save  artifacts/datajud_stats_latest.json
-
-      # Envia arquivos gerados como artefato
-      - name: Upload para GPT
-        uses: actions/upload-artifact@v4
-        with:
-          name: dados_jurimetria
-          path: artifacts/
+      - name: Run pytest
+        run: pytest -q
