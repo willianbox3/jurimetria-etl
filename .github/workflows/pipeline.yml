@@ -1,53 +1,49 @@
 name: Atualiza Jurimetria → GPT
 
 on:
-  # dispara manualmente (Run workflow) ou todos os dias 00 h BRT ≈ 03 h UTC
-  workflow_dispatch:
+  # roda todos os dias às 03 h UTC (00 h BRT) **e** quando você clicar em *Run workflow*
   schedule:
     - cron: '0 3 * * *'
+  workflow_dispatch:
 
 jobs:
   build-upload:
     runs-on: ubuntu-latest
 
-    # 🔑 expõe a chave da API CNJ ao script
+    # injeta a chave da API declarada em *Settings → Secrets → Actions*
     env:
       CNJ_API_KEY: ${{ secrets.CNJ_API_KEY }}
 
     steps:
-      # Clona o repositório
+      # 1) Clona o repositório
       - uses: actions/checkout@v4
 
-      # Instala dependências Python
+      # 2) Instala dependências
       - name: Instala dependências
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # ────────────────
-      # 1️⃣  Conector e-SAJ
-      # ────────────────
-      - name: Executa connector ESAJ
+      # 3) Executa o conector **e-SAJ** (subcomando `esaj`)
+      - name: Executa conector e-SAJ
         run: |
-          python legacy/legacy_datajud_connector.py esaj \
+          python legacy_datajud_connector.py esaj \
             --classe "Apelação Cível" \
-            --data-inicio "$(date -d '365 days ago' +%F)" \
-            --data-fim    "$(date +%F)" \
+            --data-inicio $(date -d "365 days ago" +%F) \
+            --data-fim   $(date +%F) \
             --save artifacts/esaj_decisoes_latest.json
 
-      # ────────────────
-      # 2️⃣  Conector DataJud
-      # ────────────────
-      - name: Executa connector DataJud
+      # 4) Executa o conector **DataJud** (subcomando `datajud`)
+      - name: Executa conector DataJud
         run: |
-          python legacy/legacy_datajud_connector.py datajud \
+          python legacy_datajud_connector.py datajud \
             --classe "Apelação Cível" \
-            --ano "$(date +%Y)" \
+            --ano $(date +%Y) \
             --save artifacts/datajud_stats_latest.json
 
-      # Faz upload dos arquivos gerados
+      # 5) Faz upload dos artefatos gerados
       - name: Upload para GPT
         uses: actions/upload-artifact@v4
         with:
-          name: dados-jurimetria
-          path: artifacts/*.json
+          name: jurimetria-dados
+          path: artifacts/

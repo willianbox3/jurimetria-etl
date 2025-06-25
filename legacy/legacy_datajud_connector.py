@@ -1,79 +1,75 @@
-"""
-Esaj & DataJud Connector – versão 0.2
-====================================
-• Scraping paginado do e‑SAJ/TJCE
-• Consulta autenticada ao DataJud (CNJ)
-• Logging estruturado
-
-Dependências
-------------
-```
-pip install requests beautifulsoup4 python-dotenv pandas tqdm
-```
-Coloque seu token DataJud (chave **X-API-KEY**) em `.env` ou variável de
-ambiente `DATAJUD_TOKEN`.
-"""
-
+# legacy_datajud_connector.py
 from __future__ import annotations
 
-import os
-import re
-import json
-import math
-import time
-import logging
+"""Legacy e-SAJ/DataJud connector (TJCE-focado)
+
+⚠️  Mantido apenas para cenários muito específicos de integração
+    – o fluxo principal está em *jurimetria_pipeline.py*.
+
+Compatibilidade retroativa
+--------------------------
+Até então o script era chamado sem sub-comando:
+
+    python legacy_datajud_connector.py --classe "Apelação Cível" …
+
+A CLI abaixo exige o *sub-comando* (`esaj` ou `datajud`).  Para evitar
+quebras em pipelines antigos adicionamos um *shim* que assume `esaj`
+caso nada seja informado.
+"""
+
 import argparse
+import json
+import logging
+import os
+import sys
+import time          # ➜ corrigido (usado em fetch_esaj_tjce)
 from datetime import date
-from typing import List, Dict, Generator
+from typing import Dict, List
 
 import requests
-import pandas as pd
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from tqdm import tqdm
 
 # ----------------------------------------------------------------------
-# Config & logging
+# Config
 # ----------------------------------------------------------------------
 load_dotenv()
 TOKEN_DATAJUD = os.getenv("DATAJUD_TOKEN", "")
-BASE_ESAJ = (
-    "https://esaj.tjce.jus.br/cpopg/search.do"  # endpoint GET de pesquisa pública
-)
+BASE_ESAJ = "https://esaj.tjce.jus.br/cpopg/search.do"
 BASE_DATAJUD = "https://www.cnj.jus.br/pesquisas-judiciarias/datajud/api/public"
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
 
 # ----------------------------------------------------------------------
-# e‑SAJ crawler (paginado)
+# Helpers ESAJ
 # ----------------------------------------------------------------------
+
 
 def _parse_esaj_table(html: str) -> List[Dict]:
     soup = BeautifulSoup(html, "html.parser")
-    table = soup.find("table", {"id": "tabelaResultados"})
+    table = soup.find("table", id="tabelaResultados")
     if not table:
         return []
-    rows = table.find_all("tr")[1:]  # skip header
-    out = []
+    rows = table.find_all("tr")[1:]  # pula cabeçalho
+    out: List[Dict] = []
     for tr in rows:
         cols = [c.get_text(strip=True) for c in tr.find_all("td")]
         if len(cols) < 6:
             continue
-        processo, classe, assunto, orgao, data_decisao, _ = cols[:6]
+        proc, classe, assunto, orgao, data_decisao, _ = cols[:6]
+        dia, mes, ano = data_decisao.split("/")
         out.append(
             {
-                "processo": processo,
-                "orgao": orgao,
-                "data": date.fromisoformat("-".join(reversed(data_decisao.split("/")))).isoformat(),
+                "processo": proc,
                 "classe": classe,
                 "assunto": assunto,
-                "ementa": "",  # precisaria clicar; opcional
-                "súmulas_aplicadas": [],
+                "orgao": orgao,
+                "data": f"{ano}-{mes}-{dia}",
             }
         )
     return out
@@ -86,21 +82,11 @@ def fetch_esaj_tjce(
     max_pages: int | None = None,
     pause: float = 1.0,
 ) -> List[Dict]:
-    """Raspagem paginada do e‑SAJ TJCE.
-
-    Args:
-        classe: classe processual (ex.: "Apelação Cível").
-        data_inicio: AAAA-MM-DD.
-        data_fim: AAAA-MM-DD ou None.
-        max_pages: limitar nº de páginas. None = todas.
-        pause: delay entre requisições.
-    """
-    logger.info("Iniciando scraping do e‑SAJ…")
-    session = requests.Session()
-
-    # Parâmetros genéricos do e‑SAJ (adaptado)
+    """Raspagem paginada do e-SAJ TJCE."""
+    logger.info("Scraping e-SAJ (%s)…", classe)
+    sess = requests.Session()
     query = {
-        "conversationId": "",  # sessão
+        "conversationId": "",
         "dadosConsulta.originados": "N",
         "classe": classe,
         "dataIni": data_inicio,
@@ -110,42 +96,37 @@ def fetch_esaj_tjce(
         "tipoNumero": "UNIFICADO",
     }
 
-    all_rows: List[Dict] = []
+    results: List[Dict] = []
     page = 1
-    pbar = tqdm(total=max_pages or math.inf, desc="Páginas", unit="pg")
+    pbar = tqdm(total=max_pages or float("inf"), desc="Páginas", unit="pg")
     while True:
         query["paginaConsulta"] = page
-        resp = session.get(BASE_ESAJ, params=query, timeout=30)
-        if resp.status_code != 200:
-            logger.warning("Página %s retornou %s", page, resp.status_code)
+        r = sess.get(BASE_ESAJ, params=query, timeout=30)
+        if r.status_code != 200:
+            logger.warning("Página %s retornou %s", page, r.status_code)
             break
-        rows = _parse_esaj_table(resp.text)
+        rows = _parse_esaj_table(r.text)
         if not rows:
             break
-        all_rows.extend(rows)
+        results.extend(rows)
         pbar.update(1)
         page += 1
         if max_pages and page > max_pages:
             break
         time.sleep(pause)
     pbar.close()
-    logger.info("Total de processos coletados: %s", len(all_rows))
-    return all_rows
+    logger.info("Total de processos coletados: %s", len(results))
+    return results
+
 
 # ----------------------------------------------------------------------
-# DataJud TJCE
+# Helpers DataJud
 # ----------------------------------------------------------------------
 HEADERS_DJ = {"X-API-KEY": TOKEN_DATAJUD} if TOKEN_DATAJUD else {}
 
-def fetch_datajud_tjce(
-    classe: str,
-    ano: int,
-    metrica: str = "tempo_julgamento",
-) -> Dict:
-    """Busca estatísticas da DataJud filtrando TJCE.
 
-    metrica: "tempo_julgamento" | "taxa_provimento".
-    """
+def fetch_datajud_tjce(classe: str, ano: int, metrica: str = "tempo_julgamento") -> Dict:
+    """Busca estatísticas da DataJud filtrando TJCE."""
     logger.info("Consultando DataJud (%s)…", metrica)
     endpoint = f"{BASE_DATAJUD}/estatisticas"
     params = {
@@ -157,7 +138,6 @@ def fetch_datajud_tjce(
     r = requests.get(endpoint, params=params, headers=HEADERS_DJ, timeout=30)
     r.raise_for_status()
     data = r.json()
-    # Garantir formato padrão
     return {
         "classe": classe,
         "ano": ano,
@@ -165,38 +145,46 @@ def fetch_datajud_tjce(
         "taxa_provimento_percent": data.get("taxa_provimento_percent"),
     }
 
+
 # ----------------------------------------------------------------------
 # CLI
 # ----------------------------------------------------------------------
 
-def cli() -> None:
-    parser = argparse.ArgumentParser("Connector e‑SAJ/DataJud TJCE")
-    sub = parser.add_subparsers(dest="cmd", required=True)
+# ➡️  Compat shim: insere "esaj" se nenhum sub-comando explícito for passado
+if len(sys.argv) > 1 and sys.argv[1] not in {"esaj", "datajud", "-h", "--help"}:
+    sys.argv.insert(1, "esaj")
 
-    s1 = sub.add_parser("esaj", help="Scraping do e‑SAJ")
-    s1.add_argument("--classe", required=True)
-    s1.add_argument("--data-inicio", default="2024-01-01")
-    s1.add_argument("--data-fim")
-    s1.add_argument("--max-pages", type=int)
+parser = argparse.ArgumentParser("Connector e-SAJ/DataJud TJCE")
+sub = parser.add_subparsers(dest="cmd", required=True)  # <- agora *obrigatório*
+parser.set_defaults(cmd="esaj")  # mas continua com default, se o shim não atuar
 
-    s2 = sub.add_parser("datajud", help="Estatísticas DataJud")
-    s2.add_argument("--classe", required=True)
-    s2.add_argument("--ano", type=int, required=True)
-    s2.add_argument("--metrica", choices=["tempo_julgamento", "taxa_provimento"], default="tempo_julgamento")
+# --- esaj ---
+s1 = sub.add_parser("esaj", help="Scraping do e-SAJ")
+s1.add_argument("--classe", required=True)
+s1.add_argument("--data-inicio", default="2024-01-01")
+s1.add_argument("--data-fim")
+s1.add_argument("--max-pages", type=int)
 
-    args = parser.parse_args()
+# --- datajud ---
+s2 = sub.add_parser("datajud", help="Estatísticas DataJud")
+s2.add_argument("--classe", required=True)
+s2.add_argument("--ano", type=int, required=True)
+s2.add_argument(
+    "--metrica",
+    choices=["tempo_julgamento", "taxa_provimento"],
+    default="tempo_julgamento",
+)
 
-    if args.cmd == "esaj":
-        res = fetch_esaj_tjce(
-            classe=args.classe,
-            data_inicio=args.data_inicio,
-            data_fim=args.data_fim,
-            max_pages=args.max_pages,
-        )
-        print(json.dumps(res, ensure_ascii=False, indent=2))
-    elif args.cmd == "datajud":
-        res = fetch_datajud_tjce(args.classe, args.ano, args.metrica)
-        print(json.dumps(res, ensure_ascii=False, indent=2))
+args = parser.parse_args()
 
-if __name__ == "__main__":
-    cli()
+if args.cmd == "esaj":
+    resultado = fetch_esaj_tjce(
+        classe=args.classe,
+        data_inicio=args.data_inicio,
+        data_fim=args.data_fim,
+        max_pages=args.max_pages,
+    )
+else:
+    resultado = fetch_datajud_tjce(args.classe, args.ano, args.metrica)
+
+print(json.dumps(resultado, ensure_ascii=False, indent=2))
