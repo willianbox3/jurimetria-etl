@@ -51,13 +51,13 @@ jobs:
             --ate 2023-01-31 \
             --max-processos 100
 
-      - name: Debug – listar arquivos gerados
+      - name: Debug ETL outputs
         run: |
-          echo "=== Diretório atual ==="
-          pwd
-          echo
-          echo "=== Estrutura de pastas e arquivos ==="
-          ls -R .
+          echo "=== Diretório de saída ==="
+          ls -R dados_jurimetria || true
+
+          echo "=== Preview do CSV ==="
+          head -n 20 dados_jurimetria/jurimetria.csv || true
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
