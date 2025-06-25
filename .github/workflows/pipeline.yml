@@ -1,60 +1,44 @@
-name: Atualiza Jurimetria TJCE → GPT
+name: Atualiza Jurimetria → GPT
 
 on:
+  # dispara manualmente ou no cron diário (03:00 UTC ≈ 00:00 BRT)
+  workflow_dispatch:
   schedule:
-    - cron: '0 3 * * *'   # executa diariamente às 03h UTC
-  workflow_dispatch:      # botão Run workflow
+    - cron:  '0 3 * * *'
 
 jobs:
   build-upload:
     runs-on: ubuntu-latest
 
+    # 🔑 expõe a chave de API do DataJud para o script
+    env:
+      CNJ_API_KEY: ${{ secrets.CNJ_API_KEY }}
+
     steps:
-      # Clona o repositório
-      - uses: actions/checkout@v4
+      - name: 🛎️  Checkout
+        uses: actions/checkout@v4
 
-      # Instala dependências Python
-      - name: Instalando dependências
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+      - name: 🐍  Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
 
-      # Executa o scraper e-SAJ (decisões)
-      - name: Executa conector ESAJ
-        env:
-          DATAJUD_TOKEN: ${{ secrets.DATAJUD_TOKEN }}
-        run: |
-          python esaj_datajud_connector.py \
-            --classe "Apelação Cível" \
-            --data-inicio $(date -d "365 days ago" +%F) \
-            --data-fim $(date +%F) \
-            --save artifacts/esaj_decisoes_latest.json
+      - name: 📦  Install dependencies
+        run: pip install -r requirements.txt
 
-      # Executa a coleta DataJud (estatísticas)
-      - name: Executa conector DataJud
-        env:
-          DATAJUD_TOKEN: ${{ secrets.DATAJUD_TOKEN }}
-        run: |
-          python esaj_datajud_connector.py \
-            --estatisticas --classe "Apelação Cível" \
-            --ano $(date +%Y) \
-            --save artifacts/datajud_stats_latest.json
+      - name: 🚀  Executa pipeline Jurimetria (padrão TJCE)
+        run: python src/jurimetria_pipeline.py
 
-      # Envia os JSONs ao projeto GPT (DELETE antigo + POST novo)
-      - name: Upload para GPT
-        env:
-          GPT_PROJECT_TOKEN: ${{ secrets.GPT_PROJECT_TOKEN }}
-        run: |
-          API=\"https://plataforma.ai/api/v1/projects/SEU_ID/files\"
+      - name: 📤  Upload dataset (Parquet + CSV)
+        uses: actions/upload-artifact@v4
+        with:
+          name: dados_jurimetria
+          path: dados_jurimetria/
 
-          for f in esaj_decisoes_latest.json datajud_stats_latest.json; do
-            # Remove versão antiga (ignora erro se não existir)
-            curl -s -X DELETE \"$API/$f\" \
-                 -H \"Authorization: Bearer $GPT_PROJECT_TOKEN\" || true
-
-            # Faz upload da nova versão
-            curl -s -X POST \"$API\" \
-                 -H \"Authorization: Bearer $GPT_PROJECT_TOKEN\" \
-                 -F \"file=@artifacts/$f\" \
-                 || exit 1
-          done
+      - name: 🖼️  Upload gráfico
+        if: "always()"  # faz upload mesmo se o passo anterior falhar
+        uses: actions/upload-artifact@v4
+        with:
+          name: graficos
+          path: dados_jurimetria/horario_jurimetria.jpg
