@@ -50,7 +50,6 @@ jobs:
             --max-processos 10 \
             --log-level DEBUG
 
-
       - name: Debug: mostre o que foi gerado
         run: |
           echo "=== Onde estou ==="
@@ -64,16 +63,9 @@ jobs:
         run: |
           echo "=== Preview do CSV (até 20 linhas) ==="
           head -n 20 dados_jurimetria/jurimetria.csv || echo "sem CSV"
-          echo
-          echo "=== Preview do Parquet ==="
-          ls -lh dados_jurimetria/jurimetria.parquet || echo "sem Parquet"
-          echo
-          echo "=== Imagem gerada ==="
-          ls -lh dados_jurimetria/horario_jurimetria.jpg || echo "sem imagem"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: dados-jurimetria
-          path: |
-            dados_jurimetria/**
+          path: dados_jurimetria/**
