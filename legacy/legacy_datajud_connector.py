@@ -178,11 +178,13 @@ def cli() -> None:
     s1.add_argument("--data-inicio", default="2024-01-01")
     s1.add_argument("--data-fim")
     s1.add_argument("--max-pages", type=int)
+    s1.add_argument("--save", metavar="PATH")
 
     s2 = sub.add_parser("datajud", help="Estatísticas DataJud")
     s2.add_argument("--classe", required=True)
     s2.add_argument("--ano", type=int, required=True)
     s2.add_argument("--metrica", choices=["tempo_julgamento", "taxa_provimento"], default="tempo_julgamento")
+    s2.add_argument("--save", metavar="PATH")
 
     args = parser.parse_args()
 
@@ -193,10 +195,20 @@ def cli() -> None:
             data_fim=args.data_fim,
             max_pages=args.max_pages,
         )
-        print(json.dumps(res, ensure_ascii=False, indent=2))
+        out = json.dumps(res, ensure_ascii=False, indent=2)
+        if args.save:
+            with open(args.save, "w", encoding="utf-8") as f:
+                f.write(out)
+        else:
+            print(out)
     elif args.cmd == "datajud":
         res = fetch_datajud_tjce(args.classe, args.ano, args.metrica)
-        print(json.dumps(res, ensure_ascii=False, indent=2))
+        out = json.dumps(res, ensure_ascii=False, indent=2)
+        if args.save:
+            with open(args.save, "w", encoding="utf-8") as f:
+                f.write(out)
+        else:
+            print(out)
 
 if __name__ == "__main__":
     cli()
