@@ -195,12 +195,12 @@ def parse_hit(hit: Dict[str, Any], tribunal: str) -> Dict[str, Any]:
 
 
 def build_dataframe(
-    tribunais: List[str],
+    tribunais: List[str] = DEFAULT_TRIBUNAIS,
     classe_codigo: Optional[int] = None,
     classe_nome: Optional[str] = None,
-    dt_ini: Optional[str] = None,
-    dt_fim: Optional[str] = None,
-    max_proc: Optional[int] = None,
+    de: Optional[str] = None,
+    ate: Optional[str] = None,
+    max_processos: Optional[int] = None,
 ) -> pd.DataFrame:
     frames: List[pd.DataFrame] = []
     for trib in tribunais:
@@ -269,7 +269,7 @@ def main() -> None:
     parser.add_argument("--ate", dest="dt_fim", help="Data final (YYYY-MM-DD)")
     parser.add_argument("--max-processos", type=int, dest="max_proc", help="Limite de processos a extrair")
     parser.add_argument("--log-level", default="INFO", help="Nível de log (DEBUG, INFO…)")
-    args = parser.parse_args()
+    args, _ = parser.parse_known_args()
 
     set_log_level(args.log_level)
 
