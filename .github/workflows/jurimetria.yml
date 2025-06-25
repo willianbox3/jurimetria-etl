@@ -41,15 +41,15 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run jurimetria pipeline
+      - name: Run jurimetria pipeline (modo DEBUG)
         env:
           CNJ_API_KEY: ${{ secrets.CNJ_API_KEY }}
         run: |
           python src/jurimetria_pipeline.py \
             --tribunais TJCE \
-            --de 2023-01-01 \
-            --ate 2023-01-31 \
-            --max-processos 100
+            --max-processos 10 \
+            --log-level DEBUG
+
 
       - name: Debug: mostre o que foi gerado
         run: |
