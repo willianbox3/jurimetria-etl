@@ -1,49 +1,60 @@
 name: Atualiza Jurimetria → GPT
 
 on:
-  # roda todos os dias às 03 h UTC (00 h BRT) **e** quando você clicar em *Run workflow*
+  # roda todos os dias às 03 h UTC (00 h BRT)
   schedule:
     - cron: '0 3 * * *'
+  # permite disparo manual pelo botão *Run workflow*
   workflow_dispatch:
 
 jobs:
   build-upload:
     runs-on: ubuntu-latest
 
-    # injeta a chave da API declarada em *Settings → Secrets → Actions*
+    # 🔑 injeta as chaves de API definidas em Settings → Secrets → Actions
     env:
-      CNJ_API_KEY: ${{ secrets.CNJ_API_KEY }}
+      CNJ_API_KEY:   ${{ secrets.CNJ_API_KEY   }}
+      DATAJUD_TOKEN: ${{ secrets.DATAJUD_TOKEN }}
 
     steps:
-      # 1) Clona o repositório
+      # Clona o repositório
       - uses: actions/checkout@v4
 
-      # 2) Instala dependências
+      # Prepara Python 3.11 com cache de dependências
+      - name: Configura Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      # Instala pacotes
       - name: Instala dependências
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # 3) Executa o conector **e-SAJ** (subcomando `esaj`)
-      - name: Executa conector e-SAJ
-        run: |
-          python legacy_datajud_connector.py esaj \
-            --classe "Apelação Cível" \
-            --data-inicio $(date -d "365 days ago" +%F) \
-            --data-fim   $(date +%F) \
-            --save artifacts/esaj_decisoes_latest.json
+      # ——————————————————————————————————————————————
+      #  Conectores legado  (TJCE · e-SAJ / DataJud)
+      # ——————————————————————————————————————————————
 
-      # 4) Executa o conector **DataJud** (subcomando `datajud`)
-      - name: Executa conector DataJud
+      - name: Executa conector ESAJ (TJCE)
         run: |
-          python legacy_datajud_connector.py datajud \
+          python legacy/legacy_datajud_connector.py esaj \
             --classe "Apelação Cível" \
-            --ano $(date +%Y) \
-            --save artifacts/datajud_stats_latest.json
+            --data-inicio "$(date -d '365 days ago' +%F)" \
+            --data-fim   "$(date +%F)" \
+            --save       artifacts/esaj_decisoes_latest.json
 
-      # 5) Faz upload dos artefatos gerados
+      - name: Executa conector DataJud (TJCE)
+        run: |
+          python legacy/legacy_datajud_connector.py datajud \
+            --classe "Apelação Cível" \
+            --ano   "$(date +%Y)" \
+            --save  artifacts/datajud_stats_latest.json
+
+      # Envia arquivos gerados como artefato
       - name: Upload para GPT
         uses: actions/upload-artifact@v4
         with:
-          name: jurimetria-dados
+          name: dados_jurimetria
           path: artifacts/
