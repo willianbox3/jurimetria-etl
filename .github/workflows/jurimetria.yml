@@ -51,19 +51,29 @@ jobs:
             --ate 2023-01-31 \
             --max-processos 100
 
+      - name: Debug: mostre o que foi gerado
+        run: |
+          echo "=== Onde estou ==="
+          pwd
+          echo "=== Conteúdo do workspace ==="
+          ls -R .
+          echo "=== Conteúdo de dados_jurimetria ==="
+          ls -R dados_jurimetria || echo "pasta dados_jurimetria não existe"
+
       - name: Debug ETL outputs
         run: |
-          echo "=== Diretório de saída ==="
-          ls -R dados_jurimetria || true
-
-          echo "=== Preview do CSV ==="
-          head -n 20 dados_jurimetria/jurimetria.csv || true
+          echo "=== Preview do CSV (até 20 linhas) ==="
+          head -n 20 dados_jurimetria/jurimetria.csv || echo "sem CSV"
+          echo
+          echo "=== Preview do Parquet ==="
+          ls -lh dados_jurimetria/jurimetria.parquet || echo "sem Parquet"
+          echo
+          echo "=== Imagem gerada ==="
+          ls -lh dados_jurimetria/horario_jurimetria.jpg || echo "sem imagem"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: dados-jurimetria
           path: |
-            dados_jurimetria/jurimetria.csv
-            dados_jurimetria/jurimetria.parquet
-            dados_jurimetria/horario_jurimetria.jpg
+            dados_jurimetria/**
