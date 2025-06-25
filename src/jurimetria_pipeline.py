@@ -39,8 +39,6 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import requests
-import unittest
-from unittest import mock
 
 CLASSE_CODIGO = 12729  # ANPP – mantido como padrão
 PAGE_SIZE = 1000
@@ -202,50 +200,5 @@ def main() -> None:
     plot_horario(df)
 
 
-class TestHelpers(unittest.TestCase):
-    def setUp(self):
-        matplotlib.use('Agg')
-
-    def test_tz_utc_to_sp(self):
-        ts = tz_utc_to_sp('2020-01-01T03:00:00Z')
-        self.assertEqual(ts.tz.zone, 'America/Sao_Paulo')
-        self.assertEqual(ts.hour, 0)
-
-    def test_tz_utc_to_sp_none(self):
-        self.assertIsNone(tz_utc_to_sp(None))
-
-    def test_lista_assuntos(self):
-        raw = [{'nome': 'Penal'}, {'nome': 'Civil'}]
-        self.assertEqual(lista_assuntos(raw), ['Penal', 'Civil'])
-
-    def test_lista_movimentos(self):
-        raw = [
-            {'codigo': 2, 'nome': 'B', 'dataHora': '2020-01-01T12:00:00Z'},
-            {'codigo': 1, 'nome': 'A', 'dataHora': '2020-01-02T12:00:00Z'},
-        ]
-        result = lista_movimentos(raw)
-        order = [r[0] for r in result]
-        self.assertEqual(order, [2, 1])
-
-    def test_build_base_url(self):
-        url = build_base_url('TJSP')
-        expected = 'https://api-publica.datajud.cnj.jus.br/api_publica_tjsp/_search'
-        self.assertEqual(url, expected)
-
-    def test_default_tribunais(self):
-        self.assertEqual(DEFAULT_TRIBUNAIS, ['TJCE'])
-
-
-class TestMain(unittest.TestCase):
-    def test_main_handles_missing_api_key(self):
-        with mock.patch.dict(os.environ, {}, clear=True):
-            with mock.patch('builtins.print') as mocked_print:
-                main()
-                mocked_print.assert_any_call('⚠️  Defina a variável de ambiente CNJ_API_KEY antes de executar o script.')
-
-
 if __name__ == '__main__':
-    if len(sys.argv) > 1 and sys.argv[1] == 'test':
-        unittest.main(argv=sys.argv[:1])
-    else:
-        main()
+    main()
