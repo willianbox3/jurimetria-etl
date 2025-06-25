@@ -53,8 +53,10 @@ Este script (antigo `esaj_datajud_connector.py`) é **enxuto** e serve somente p
 
 1. Crie um *branch* a partir de `main`.
 2. Siga o padrão *Black* (`black .`).
-3. Adicione/atualize *tests* (`python jurimetria_pipeline.py test`).
-4. Abra um *pull request*.
+3. Instale as dependências antes de rodar os testes:
+   `pip install -r requirements.txt`
+4. Adicione/atualize *tests* (`python jurimetria_pipeline.py test`).
+5. Abra um *pull request*.
 
 ---
 
