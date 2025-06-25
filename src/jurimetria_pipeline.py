@@ -1,18 +1,26 @@
-# anpp_pipeline.py
-'''Coleta, tratamento e análises dos ANPPs do TJSP via API‑CNJ
+# jurimetria_pipeline.py
+"""Coleta, tratamento e análises de dados judiciais via API CNJ (jurimetria)
+
+Este script era anteriormente chamado de `anpp_pipeline.py`. Foi renomeado para
+representar melhor o objetivo de jurimetria geral, embora ainda venha
+pré‑configurado para buscar a classe **ANPP** (código 12729).  
 
 Melhorias incorporadas
 ----------------------
-*   Paginação automática (>10 000 resultados)  
+*   Paginação automática (> 10 000 resultados)  
 *   Chave da API lida de variável de ambiente (`CNJ_API_KEY`)  
 *   Datas "aware" em UTC → convertidas para America/Sao_Paulo  
 *   Pipeline modularizado em funções para facilitar testes  
 *   Persistência em Parquet (`zstd`) + CSV opcional  
-*   Gráfico de horário de ajuizamento
+*   Gráfico de horário de ajuizamento  
+*   Suporte a lote de tribunais (e.g. `TJSP TJCE TJRS`)  
+*   **Padrão: TJCE** quando nenhum tribunal é informado
 
 Executar:
-    CNJ_API_KEY='APIKey …' python anpp_pipeline.py
-'''
+    CNJ_API_KEY='APIKey …' python jurimetria_pipeline.py TJSP TJCE
+    # ou simplesmente, para buscar apenas no TJCE (padrão):
+    python jurimetria_pipeline.py
+"""
 from __future__ import annotations
 
 import os
@@ -34,12 +42,11 @@ import requests
 import unittest
 from unittest import mock
 
-TRIBUNAL = 'TJSP'
-CLASSE_CODIGO = 12729
+CLASSE_CODIGO = 12729  # ANPP – mantido como padrão
 PAGE_SIZE = 1000
-BASE_URL = 'https://api-publica.datajud.cnj.jus.br/api_publica_tjsp/_search'
+DEFAULT_TRIBUNAIS = ['TJCE']  # padrão alterado para TJCE
 
-OUT_DIR = Path('dados_anpp').resolve()
+OUT_DIR = Path('dados_jurimetria').resolve()
 OUT_DIR.mkdir(exist_ok=True, parents=True)
 
 
@@ -53,6 +60,10 @@ def get_headers() -> Dict[str, str]:
         'Authorization': api_key,
         'Content-Type': 'application/json',
     }
+
+
+def build_base_url(tribunal: str) -> str:
+    return f'https://api-publica.datajud.cnj.jus.br/api_publica_{tribunal.lower()}/_search'
 
 
 def tz_utc_to_sp(dt_str: Optional[str]) -> Optional[pd.Timestamp]:
@@ -77,8 +88,9 @@ def lista_movimentos(raw_movs: List[Dict[str, Any]]) -> List[List[Any]]:
     return sorted(movs, key=lambda x: x[2] or default_ts)
 
 
-def fetch_raw_hits(classe: int = CLASSE_CODIGO, page_size: int = PAGE_SIZE) -> Generator[Dict[str, Any], None, None]:
+def fetch_raw_hits(tribunal: str, classe: int = CLASSE_CODIGO, page_size: int = PAGE_SIZE) -> Generator[Dict[str, Any], None, None]:
     headers = get_headers()
+    base_url = build_base_url(tribunal)
     payload_base = {
         'size': page_size,
         'query': {'match': {'classe.codigo': classe}},
@@ -89,7 +101,9 @@ def fetch_raw_hits(classe: int = CLASSE_CODIGO, page_size: int = PAGE_SIZE) -> G
         payload = dict(payload_base)
         if search_after is not None:
             payload['search_after'] = search_after
-        resp = requests.post(BASE_URL, headers=headers, json=payload, timeout=60)
+        resp = requests.post(base_url, headers=headers, json=payload, timeout=60)
+        if resp.status_code == 404:
+            break
         resp.raise_for_status()
         hits = resp.json().get('hits', {}).get('hits', [])
         if not hits:
@@ -101,9 +115,10 @@ def fetch_raw_hits(classe: int = CLASSE_CODIGO, page_size: int = PAGE_SIZE) -> G
         search_after = new_search_after
 
 
-def parse_hit(hit: Dict[str, Any]) -> Dict[str, Any]:
+def parse_hit(hit: Dict[str, Any], tribunal: str) -> Dict[str, Any]:
     src = hit['_source']
     return {
+        'tribunal': tribunal,
         'numero_processo': src.get('numeroProcesso'),
         'classe': src.get('classe', {}).get('nome'),
         'data_ajuizamento': tz_utc_to_sp(src.get('dataAjuizamento')),
@@ -119,18 +134,23 @@ def parse_hit(hit: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def build_dataframe() -> pd.DataFrame:
-    registros = [parse_hit(h) for h in fetch_raw_hits()]
-    df = pd.DataFrame(registros)
-    return df
+def build_dataframe(tribunais: List[str]) -> pd.DataFrame:
+    frames: List[pd.DataFrame] = []
+    for trib in tribunais:
+        registros = [parse_hit(h, trib) for h in fetch_raw_hits(trib)]
+        if registros:
+            frames.append(pd.DataFrame(registros))
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
 
 
 def persist_df(df: pd.DataFrame) -> None:
     if df.empty:
         print('Nenhum dado para persistir.')
         return
-    parquet_path = OUT_DIR / 'anpp.parquet'
-    csv_path = OUT_DIR / 'anpp.csv'
+    parquet_path = OUT_DIR / 'jurimetria.parquet'
+    csv_path = OUT_DIR / 'jurimetria.csv'
     df.to_parquet(parquet_path, compression='zstd', index=False)
     df.to_csv(csv_path, index=False)
     print(f'Dados salvos em:\n  • {parquet_path}\n  • {csv_path}')
@@ -152,22 +172,25 @@ def plot_horario(df: pd.DataFrame) -> None:
     contagem = horas.value_counts().sort_index()
     plt.figure(figsize=(12, 6))
     contagem.plot(kind='bar')
-    plt.title('Horário de ajuizamento dos ANPPs (TJSP)')
+    plt.title('Horário de ajuizamento (classe 12729)')
     plt.xlabel('Hora do dia')
     plt.ylabel('Número de ajuizamentos')
     plt.xticks(rotation=0)
     plt.grid(axis='y', alpha=0.4)
     plt.tight_layout()
-    out_path = OUT_DIR / 'horario_anpp.jpg'
+    out_path = OUT_DIR / 'horario_jurimetria.jpg'
     plt.savefig(out_path, dpi=150)
     print(f'Gráfico salvo em {out_path}')
     plt.close()
 
 
 def main() -> None:
+    tribunais = DEFAULT_TRIBUNAIS
+    if len(sys.argv) > 1 and sys.argv[1] != 'test':
+        tribunais = sys.argv[1:]
     try:
-        print('⏳ Coletando dados …')
-        df = build_dataframe()
+        print(f'⏳ Coletando dados para: {", ".join(tribunais)} …')
+        df = build_dataframe(tribunais)
     except EnvironmentError as err:
         print(f'⚠️  {err}')
         return
@@ -203,6 +226,14 @@ class TestHelpers(unittest.TestCase):
         result = lista_movimentos(raw)
         order = [r[0] for r in result]
         self.assertEqual(order, [2, 1])
+
+    def test_build_base_url(self):
+        url = build_base_url('TJSP')
+        expected = 'https://api-publica.datajud.cnj.jus.br/api_publica_tjsp/_search'
+        self.assertEqual(url, expected)
+
+    def test_default_tribunais(self):
+        self.assertEqual(DEFAULT_TRIBUNAIS, ['TJCE'])
 
 
 class TestMain(unittest.TestCase):
