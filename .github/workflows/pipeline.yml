@@ -1,63 +1,68 @@
-name: Atualiza Jurimetria → GPT
+# GitHub Actions – Jurimetria ETL
+# Atualiza diariamente (03 h UTC) ou manualmente via botão *Run workflow*
+# Mantém dois conectores (legacy) e a pipeline principal de múltiplos TJs.
+
+name: Atualiza Jurimetria → GPT
 
 on:
-  # botão “Run workflow” no GitHub
   workflow_dispatch:
-    inputs:
-      tribunais:
-        description: "Lista de tribunais (ex.: 'TJCE TJSP') – vazio = TJCE"
-        required: false
-        default: ""
-  # agenda diária (03 h UTC ≅ 00 h BRT)
   schedule:
-    - cron: '0 3 * * *'
+    - cron: '0 3 * * *'   # ≅ 00:00 BRT
 
 jobs:
   build-upload:
     runs-on: ubuntu-latest
 
-    # segredos expostos a TODOS os passos
+    # ➜ expõe a chave de API do DataJud/ESAJ ao script
     env:
-      CNJ_API_KEY:  ${{ secrets.CNJ_API_KEY }}   # usado pelo pipeline principal
-      DATAJUD_TOKEN: ${{ secrets.CNJ_API_KEY }}  # reutilizado pelo conector legado
+      CNJ_API_KEY: ${{ secrets.CNJ_API_KEY }}
 
     steps:
+      # Clona o repositório
       - uses: actions/checkout@v4
 
-      - name: ⚙️ Configura Python
+      # Instala Python + dependências (cache‑pip ❤)
+      - name: Setup Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
 
-      - name: 📥 Instala dependências
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # ──────────────────────────────────────────────
-      - name: 🚀 Executa pipeline Jurimetria
-        run: |
-          python src/jurimetria_pipeline.py ${{ github.event.inputs.tribunais }}
-
-      - name: 🐍 Executa conector ESAJ legado
+      # ─────────────────────────────────────────────
+      # Conector e‑SAJ (scraping TJCE / outros ESAJ)
+      # Sub‑comando «esaj» OBRIGATÓRIO ➟ corrige erro «invalid choice»
+      - name: Executa connector ESAJ
         run: |
           python legacy/legacy_datajud_connector.py esaj \
             --classe "Apelação Cível" \
-            --save dados_jurimetria/legacy_esaj.json
+            --data-inicio $(date -d "365 days ago" +'%F') \
+            --data-fim $(date +'%F') \
+            --save artifacts/esaj_decisoes_latest.json
 
-      - name: 🐍 Executa conector DataJud legado
+      # Conector DataJud (estatísticas CNJ)
+      # Sub‑comando «datajud» OBRIGATÓRIO
+      - name: Executa connector DataJud
         run: |
           python legacy/legacy_datajud_connector.py datajud \
             --classe "Apelação Cível" \
-            --save dados_jurimetria/legacy_datajud.json
-      # ──────────────────────────────────────────────
+            --ano $(date +'%Y') \
+            --save artifacts/datajud_stats_latest.json
 
-      - name: 📦 Faz upload de artefatos
+      # Pipeline oficial – coleta multiplica TJs (TJCE padrão + outros)
+      - name: Executa jurimetria_pipeline (TJCE,TJSP,TJRS de exemplo)
+        run: |
+          python src/jurimetria_pipeline.py TJCE TJSP TJRS
+
+      # Faz upload dos artefatos para inspeção / etapas seguintes
+      - name: Upload para GPT
         uses: actions/upload-artifact@v4
         with:
-          name: datasets
+          name: dados_jurimetria
           path: |
-            dados_jurimetria/*.parquet
-            dados_jurimetria/*.csv
-            dados_jurimetria/*.jpg
-            dados_jurimetria/legacy_*.json
+            artifacts/*.json
+            dados_jurimetria/**
