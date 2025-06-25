@@ -3,3 +3,4 @@ artifacts/
 .ruff_cache/
 .pytest_cache/
 __pycache__/
+dados_jurimetria/
