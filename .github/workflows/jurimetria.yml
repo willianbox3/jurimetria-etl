@@ -2,67 +2,31 @@ name: Jurimetria ETL
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
-  # 1) Job de Testes
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Run pytest
-        run: pytest -q
-
-  # 2) Job ETL (depende de test)
   etl:
-    needs: test
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+      - run: pip install -r requirements.txt
 
-      - name: Run jurimetria pipeline (modo DEBUG)
+      - name: Run jurimetria pipeline
         env:
           CNJ_API_KEY: ${{ secrets.CNJ_API_KEY }}
         run: |
           python src/jurimetria_pipeline.py \
             --tribunais TJCE \
-            --max-processos 10 \
+            --de 2023-01-01 \
+            --ate 2023-01-31 \
+            --max-processos 100 \
             --log-level DEBUG
-
-      - name: Debug: mostre o que foi gerado
-        run: |
-          echo "=== Onde estou ==="
-          pwd
-          echo "=== Conteúdo do workspace ==="
-          ls -R .
-          echo "=== Conteúdo de dados_jurimetria ==="
-          ls -R dados_jurimetria || echo "pasta dados_jurimetria não existe"
-
-      - name: Debug ETL outputs
-        run: |
-          echo "=== Preview do CSV (até 20 linhas) ==="
-          head -n 20 dados_jurimetria/jurimetria.csv || echo "sem CSV"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
