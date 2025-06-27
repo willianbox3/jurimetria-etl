@@ -28,6 +28,14 @@ jobs:
             --max-processos 100 \
             --log-level DEBUG
 
+      - name: Debug: liste o workspace e a pasta de saída
+        run: |
+          echo ">> pwd: $(pwd)"
+          echo ">> root contents:"
+          ls -l .
+          echo ">> dados_jurimetria contents:"
+          ls -l dados_jurimetria || echo ">> pasta não existe ou está vazia"
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
