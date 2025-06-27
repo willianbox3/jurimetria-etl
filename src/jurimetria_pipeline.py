@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import sys
-import os                        
+import os
 import argparse
 import logging
 from pathlib import Path
@@ -95,19 +94,15 @@ def fetch_raw_hits(
     if classe_nome:
         filters.append({'term': {'classe.nome.keyword': classe_nome}})
     if dt_ini or dt_fim:
-        range_filter: Dict[str, Any] = {}
+        rf: Dict[str, Any] = {}
         if dt_ini:
-            range_filter['gte'] = dt_ini
+            rf['gte'] = dt_ini
         if dt_fim:
-            range_filter['lte'] = dt_fim
-        filters.append({'range': {'dataAjuizamento': range_filter}})
+            rf['lte'] = dt_fim
+        filters.append({'range': {'dataAjuizamento': rf}})
 
-    if filters:
-        query: Dict[str, Any] = {'bool': {'must': filters}}
-    else:
-        query = {'match_all': {}}
-
-    payload_base: Dict[str, Any] = {
+    query = {'bool': {'must': filters}} if filters else {'match_all': {}}
+    payload_base = {
         'size': page_size,
         'query': query,
         'sort': [
@@ -146,10 +141,10 @@ def fetch_raw_hits(
             if max_processos is not None and retrieved >= max_processos:
                 return
 
-        new_search_after = hits[-1].get('sort')
-        if new_search_after == search_after:
+        new_sa = hits[-1].get('sort')
+        if new_sa == search_after:
             break
-        search_after = new_search_after
+        search_after = new_sa
 
 
 def parse_hit(hit: Dict[str, Any], tribunal: str) -> Dict[str, Any]:
@@ -201,9 +196,7 @@ def build_dataframe(
         ]
         if registros:
             frames.append(pd.DataFrame(registros))
-    if not frames:
-        return pd.DataFrame()
-    return pd.concat(frames, ignore_index=True)
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
 def persist_df(df: pd.DataFrame) -> None:
@@ -259,7 +252,7 @@ def main() -> None:
     parser.add_argument(
         '--tribunais',
         nargs='+',
-        help='Lista de tribunais (ex.: TJCE TJSP). Se omitido, padrão é TJCE.',
+        help='Lista de tribunais (ex.: TJCE TJSP).',
     )
     parser.add_argument(
         '--classe-codigo',
@@ -272,28 +265,24 @@ def main() -> None:
         '--classe',
         dest='classe_nome',
         type=str,
-        default=None,
         help='Nome da classe (ex.: "Apelação Cível").',
     )
     parser.add_argument(
         '--de',
         dest='de',
         type=str,
-        default=None,
         help='Data inicial (YYYY-MM-DD).',
     )
     parser.add_argument(
         '--ate',
         dest='ate',
         type=str,
-        default=None,
         help='Data final (YYYY-MM-DD).',
     )
     parser.add_argument(
         '--max-processos',
         dest='max_processos',
         type=int,
-        default=None,
         help='Máximo de processos a extrair.',
     )
     parser.add_argument(
@@ -303,6 +292,7 @@ def main() -> None:
         default='INFO',
         help='Nível de log.',
     )
+
     # ignora flags não reconhecidas (ex.: pytest -q)
     args, _ = parser.parse_known_args()
 
@@ -325,7 +315,7 @@ def main() -> None:
         )
     except EnvironmentError as e:
         print(f'⚠️  {e}')
-        sys.exit(1)          # ← precisa do sys importado
+        return      # <--- aqui não usa sys.exit()
 
     print(f'✔️  Total de processos: {len(df):,}')
     persist_df(df)
