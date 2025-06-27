@@ -19,9 +19,11 @@ CLASSE_CODIGO = 12729
 PAGE_SIZE = 1000
 DEFAULT_TRIBUNAIS = ['TJCE']
 
+# Diretório de saída
 OUT_DIR = Path('dados_jurimetria').resolve()
 OUT_DIR.mkdir(exist_ok=True, parents=True)
 
+# Carrega lookup de municípios IBGE -> nome
 MUNICIPIOS_CSV = Path('data/municipios_ibge.csv')
 if MUNICIPIOS_CSV.exists():
     try:
@@ -90,12 +92,12 @@ def fetch_raw_hits(
     if classe_nome:
         filters.append({'term': {'classe.nome.keyword': classe_nome}})
     if dt_ini or dt_fim:
-        range_filter: Dict[str, Any] = {}
+        rng: Dict[str, Any] = {}
         if dt_ini:
-            range_filter['gte'] = dt_ini
+            rng['gte'] = dt_ini
         if dt_fim:
-            range_filter['lte'] = dt_fim
-        filters.append({'range': {'dataAjuizamento': range_filter}})
+            rng['lte'] = dt_fim
+        filters.append({'range': {'dataAjuizamento': rng}})
 
     if filters:
         query: Dict[str, Any] = {'bool': {'must': filters}}
@@ -128,6 +130,7 @@ def fetch_raw_hits(
         if resp.status_code == 404:
             break
         resp.raise_for_status()
+
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug("Response [%d]: %s", resp.status_code, resp.text)
 
@@ -149,8 +152,9 @@ def fetch_raw_hits(
 
 def parse_hit(hit: Dict[str, Any], tribunal: str) -> Dict[str, Any]:
     src = hit.get('_source', {})
+
     cod_ibge = src.get('orgaoJulgador', {}).get('codigoMunicipioIBGE')
-    nome_mun = None
+    nome_mun: Optional[str] = None
     if cod_ibge is not None:
         cod_str = str(cod_ibge)
         if not _mun.empty and cod_str in _mun.index:
@@ -200,20 +204,17 @@ def build_dataframe(
 
 def persist_df(df: pd.DataFrame) -> None:
     parquet_path = OUT_DIR / 'jurimetria.parquet'
-    csv_path     = OUT_DIR / 'jurimetria.csv'
+    csv_path = OUT_DIR / 'jurimetria.csv'
     df.to_parquet(parquet_path, compression='zstd', index=False)
     df.to_csv(csv_path, index=False)
-    if df.empty:
-        print('⚠️ DataFrame vazio, mas arquivos vazios foram gerados:')
-    else:
-        print('Dados salvos em:')
-    print(f'  • {parquet_path}\n  • {csv_path}')
+    print(f'Dados salvos em:\n  • {parquet_path}\n  • {csv_path}')
 
 
 def plot_horario(df: pd.DataFrame, classe_nome: Optional[str], classe_codigo: Optional[int]) -> None:
     if df.empty:
         print('Nenhum dado para plotar.')
         return
+
     horas = (
         pd.to_datetime(df['data_ajuizamento'], utc=True, errors='coerce')
         .dropna().dt.tz_convert('America/Sao_Paulo').dt.hour
@@ -221,34 +222,38 @@ def plot_horario(df: pd.DataFrame, classe_nome: Optional[str], classe_codigo: Op
     if horas.empty:
         print('Nenhum dado válido de horário para plotar.')
         return
+
     contagem = horas.value_counts().sort_index()
     plt.figure(figsize=(12, 6))
     contagem.plot(kind='bar')
     plt.title(f"Horário de ajuizamento – classe {classe_nome or classe_codigo}")
-    plt.xlabel('Hora do dia'); plt.ylabel('Número de ajuizamentos')
-    plt.xticks(rotation=0); plt.grid(axis='y', alpha=0.4)
+    plt.xlabel('Hora do dia')
+    plt.ylabel('Número de ajuizamentos')
+    plt.xticks(rotation=0)
+    plt.grid(axis='y', alpha=0.4)
     plt.tight_layout()
+
     out_path = OUT_DIR / 'horario_jurimetria.jpg'
-    plt.savefig(out_path, dpi=150); plt.close()
+    plt.savefig(out_path, dpi=150)
     print(f'Gráfico salvo em {out_path}')
+    plt.close()
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Pipeline de Jurimetria via API pública do CNJ')
-    parser.add_argument('--tribunais', nargs='+', help='Tribunais (ex.: TJCE TJSP).')
+    parser.add_argument('--tribunais', nargs='+', help='Lista de tribunais (ex.: TJCE TJSP).')
     parser.add_argument('--classe-codigo', dest='classe_codigo', type=int, default=CLASSE_CODIGO)
-    parser.add_argument('--classe',        dest='classe_nome',   type=str, default=None)
-    parser.add_argument('--de',            dest='de',            type=str, default=None)
-    parser.add_argument('--ate',          dest='ate',           type=str, default=None)
-    parser.add_argument('--max-processos',dest='max_processos', type=int, default=None)
+    parser.add_argument('--classe', dest='classe_nome', type=str, default=None)
+    parser.add_argument('--de', dest='de', type=str, default=None)
+    parser.add_argument('--ate', dest='ate', type=str, default=None)
+    parser.add_argument('--max-processos', dest='max_processos', type=int, default=None)
     parser.add_argument('--log-level', dest='log_level',
-                        choices=['DEBUG','INFO','WARNING','ERROR','CRITICAL'],
+                        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                         default='INFO')
     args, _ = parser.parse_known_args()
 
-    logging.basicConfig(
-        level=getattr(logging, args.log_level), format='[%(levelname)s] %(message)s'
-    )
+    logging.basicConfig(level=getattr(logging, args.log_level),
+                        format='[%(levelname)s] %(message)s')
 
     tribunais = args.tribunais or DEFAULT_TRIBUNAIS
 
@@ -263,9 +268,11 @@ def main() -> None:
             max_processos=args.max_processos,
         )
     except EnvironmentError as e:
-        print(f'⚠️  {e}'); sys.exit(1)
+        print(f'⚠️  {e}')
+        sys.exit(1)
     except HTTPError as e:
-        print(f'⚠️  Falha na API CNJ: {e}'); df = pd.DataFrame()
+        print(f'⚠️  Falha na API CNJ: {e}')
+        df = pd.DataFrame()
 
     print(f'✔️  Total de processos: {len(df):,}')
     persist_df(df)
