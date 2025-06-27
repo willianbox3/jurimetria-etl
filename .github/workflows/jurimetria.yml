@@ -39,6 +39,8 @@ jobs:
             --log-level DEBUG
 
       - name: Debug: listar saída
+
+      
         run: |
           echo ">> pwd: $(pwd)"
           echo ">> Conteúdo raiz:"
