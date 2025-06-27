@@ -13,39 +13,35 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import requests
-from pathlib import Path
 
-# ──────────────────────────────────────────────────────────────
-# CONFIGURAÇÃO BÁSICA
-# ──────────────────────────────────────────────────────────────
-CLASSE_CODIGO = 12729          # ANPP – mantido como padrão
+CLASSE_CODIGO = 12729  # ANPP – mantido como padrão
 PAGE_SIZE = 1000
-DEFAULT_TRIBUNAIS = ['TJCE']   # padrão quando nenhum tribunal é informado
+DEFAULT_TRIBUNAIS = ['TJCE']  # padrão quando nenhum tribunal é informado
+
+# Diretório de saída
 OUT_DIR = Path('dados_jurimetria').resolve()
 OUT_DIR.mkdir(exist_ok=True, parents=True)
 
-# extrai o código IBGE e tenta lookup do nome
-    cod_ibge = src.get('orgaoJulgador', {}).get('codigoMunicipioIBGE')
-    nome_mun = None
-    if cod_ibge is not None:
-        cod_str = str(cod_ibge)
-        if cod_str in _mun.index:
-            nome_mun = _mun.loc[cod_str, "nome_municipio"]
+# Carrega lookup de municípios IBGE -> nome
+MUNICIPIOS_CSV = Path('data/municipios_ibge.csv')
+if MUNICIPIOS_CSV.exists():
+    try:
+        _mun = pd.read_csv(MUNICIPIOS_CSV, dtype={'codigo_municipio_ibge': str})
+        _mun.set_index('codigo_municipio_ibge', inplace=True)
+    except Exception:
+        _mun = pd.DataFrame()
+else:
+    _mun = pd.DataFrame()
 
 logger = logging.getLogger(__name__)
 
-# ──────────────────────────────────────────────────────────────
-# UTILITÁRIOS
-# ──────────────────────────────────────────────────────────────
+
 def get_headers() -> Dict[str, str]:
     api_key = os.getenv('CNJ_API_KEY')
     if not api_key:
-        print('⚠️  Defina a variável de ambiente CNJ_API_KEY antes de executar o script.')
-        print('⚠️  A variável de ambiente CNJ_API_KEY não está definida.')
-        print('Defina‑a antes de executar o script. Ex.:')
-        print('  export CNJ_API_KEY="sua_chave_aqui"  # Linux/macOS')
-        print('  $env:CNJ_API_KEY="sua_chave_aqui"    # Windows PowerShell')
-        sys.exit(1)
+        raise EnvironmentError(
+            'Defina a variável de ambiente CNJ_API_KEY antes de executar o script.'
+        )
     if not api_key.lower().startswith('apikey'):
         api_key = f'APIKey {api_key}'
     return {
@@ -59,29 +55,14 @@ def build_base_url(tribunal: str) -> str:
 
 
 def tz_utc_to_sp(dt_str: Optional[str]) -> Optional[pd.Timestamp]:
-    """
-    Converte string UTC (ISO 8601) para fuso America/Sao_Paulo,
-    tolerando datas fora do intervalo suportado pelo pandas.
-    Retorna None se a conversão falhar.
-    """
     if not dt_str:
         return None
-
-    ts = pd.to_datetime(dt_str, utc=True, errors="coerce")  # evita OutOfBounds
-    if ts is pd.NaT:
-        logger.warning("Out‑of‑bounds ou data inválida: %s", dt_str)
-        return None
+    ts = pd.to_datetime(dt_str, utc=True)
     return ts.tz_convert('America/Sao_Paulo')
 
 
 def lista_assuntos(raw_assuntos: List[Dict[str, Any]]) -> List[str]:
-    nomes = []
-    for a in raw_assuntos:
-        if isinstance(a, dict):
-            nomes.append(a.get('nome', ''))
-        else:
-            nomes.append('')
-    return nomes
+    return [a.get('nome', '') for a in raw_assuntos]
 
 
 def lista_movimentos(raw_movs: List[Dict[str, Any]]) -> List[List[Any]]:
@@ -94,9 +75,7 @@ def lista_movimentos(raw_movs: List[Dict[str, Any]]) -> List[List[Any]]:
     default_ts = pd.Timestamp('1970-01-01', tz='America/Sao_Paulo')
     return sorted(movs, key=lambda x: x[2] or default_ts)
 
-# ──────────────────────────────────────────────────────────────
-# COLETA (fetch) E PARSE
-# ──────────────────────────────────────────────────────────────
+
 def fetch_raw_hits(
     tribunal: str,
     classe_codigo: Optional[int] = CLASSE_CODIGO,
@@ -107,10 +86,9 @@ def fetch_raw_hits(
     max_processos: Optional[int] = None,
 ) -> Generator[Dict[str, Any], None, None]:
     headers = get_headers()
-    tribunal_lower = tribunal.lower()
-    base_url = build_base_url(tribunal_lower)
+    base_url = build_base_url(tribunal)
 
-    # filtros
+    # Monta filtros
     filters: List[Dict[str, Any]] = []
     if classe_codigo is not None:
         filters.append({'term': {'classe.codigo': classe_codigo}})
@@ -124,12 +102,18 @@ def fetch_raw_hits(
             range_filter['lte'] = dt_fim
         filters.append({'range': {'dataAjuizamento': range_filter}})
 
-    query = {'bool': {'must': filters}} if filters else {'match_all': {}}
+    if filters:
+        query: Dict[str, Any] = {'bool': {'must': filters}}
+    else:
+        query = {'match_all': {}}
 
     payload_base: Dict[str, Any] = {
         'size': page_size,
         'query': query,
-        'sort': [{'dataAjuizamento': {'order': 'desc'}}],
+        'sort': [
+            {'dataAjuizamento': {'order': 'desc'}},
+            {'_id': 'asc'}
+        ],
     }
 
     retrieved = 0
@@ -140,15 +124,18 @@ def fetch_raw_hits(
         if search_after is not None:
             payload['search_after'] = search_after
 
-        logger.info("Buscando %d processos em %s…", page_size, tribunal_lower)
-        try:
-            resp = requests.post(base_url, headers=headers, json=payload, timeout=60)
-            if resp.status_code == 404:
-                break
-            resp.raise_for_status()
-        except requests.exceptions.HTTPError as e:
-            logger.error("HTTP error %s: %s", resp.status_code, resp.text)
-            raise e
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("Request payload: %s", payload)
+        else:
+            logger.info("Buscando %d processos em %s...", page_size, tribunal)
+
+        resp = requests.post(base_url, headers=headers, json=payload, timeout=60)
+        if resp.status_code == 404:
+            break
+        resp.raise_for_status()
+
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("Response [%d]: %s", resp.status_code, resp.text)
 
         hits = resp.json().get('hits', {}).get('hits', [])
         if not hits:
@@ -168,37 +155,38 @@ def fetch_raw_hits(
 
 def parse_hit(hit: Dict[str, Any], tribunal: str) -> Dict[str, Any]:
     src = hit.get('_source', {})
-    data_ajuizamento = tz_utc_to_sp(src.get('dataAjuizamento'))
-    ultima_atualizacao = tz_utc_to_sp(src.get('dataHoraUltimaAtualizacao'))
-    # extrai o código IBGE e tenta lookup do nome
+
+    # extrai código IBGE e faz lookup de nome de município
     cod_ibge = src.get('orgaoJulgador', {}).get('codigoMunicipioIBGE')
-    nome_mun = None
+    nome_mun: Optional[str] = None
     if cod_ibge is not None:
         cod_str = str(cod_ibge)
-        if cod_str in _mun.index:
-            nome_mun = _mun.loc[cod_str, "nome_municipio"]
+        if not _mun.empty and cod_str in _mun.index:
+            try:
+                nome_mun = _mun.loc[cod_str, 'nome_municipio']
+            except Exception:
+                nome_mun = None
 
     return {
         'tribunal': tribunal,
         'numero_processo': src.get('numeroProcesso'),
         'classe': src.get('classe', {}).get('nome'),
-        'data_ajuizamento': data_ajuizamento,
-        'ultima_atualizacao': ultima_atualizacao,
+        'data_ajuizamento': tz_utc_to_sp(src.get('dataAjuizamento')),
+        'ultima_atualizacao': tz_utc_to_sp(src.get('dataHoraUltimaAtualizacao')),
         'formato': src.get('formato', {}).get('nome'),
         'codigo': src.get('orgaoJulgador', {}).get('codigo'),
         'orgao_julgador': src.get('orgaoJulgador', {}).get('nome'),
-        'municipio': src.get('orgaoJulgador', {}).get('codigoMunicipioIBGE'),
-        'municipio_codigo_ibge': cod_ibge,
-        'municipio': nome_mun,
+        # mantém o código para compatibilidade
+        'municipio': cod_ibge,
+        # novo campo com o nome mapeado (ou None se não encontrado)
+        'municipio_nome': nome_mun,
         'grau': src.get('grau'),
         'assuntos': lista_assuntos(src.get('assuntos', [])),
         'movimentos': lista_movimentos(src.get('movimentos', [])),
         'sort': hit.get('sort', [None])[0],
     }
 
-# ──────────────────────────────────────────────────────────────
-# DATAFRAME, PERSISTÊNCIA E PLOT
-# ──────────────────────────────────────────────────────────────
+
 def build_dataframe(
     tribunais: List[str] = DEFAULT_TRIBUNAIS,
     classe_codigo: Optional[int] = None,
@@ -208,7 +196,6 @@ def build_dataframe(
     max_processos: Optional[int] = None,
 ) -> pd.DataFrame:
     frames: List[pd.DataFrame] = []
-    total_filtered = 0
     for trib in tribunais:
         registros = [
             parse_hit(h, trib)
@@ -216,17 +203,11 @@ def build_dataframe(
                 trib, classe_codigo, classe_nome, de, ate, PAGE_SIZE, max_processos
             )
         ]
-        # Filter out records with invalid or None data_ajuizamento
-        registros_validos = [r for r in registros if r.get('data_ajuizamento') is not None]
-        filtered_count = len(registros) - len(registros_validos)
-        total_filtered += filtered_count
-        if filtered_count > 0:
-            logger.warning("Filtrados %d registros com datas inválidas em %s", filtered_count, trib)
-        if registros_validos:
-            frames.append(pd.DataFrame(registros_validos))
-    if total_filtered > 0:
-        logger.info("Total de registros filtrados por datas inválidas: %d", total_filtered)
-    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+        if registros:
+            frames.append(pd.DataFrame(registros))
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
 
 
 def persist_df(df: pd.DataFrame) -> None:
@@ -235,19 +216,7 @@ def persist_df(df: pd.DataFrame) -> None:
         return
     parquet_path = OUT_DIR / 'jurimetria.parquet'
     csv_path = OUT_DIR / 'jurimetria.csv'
-    # Convert 'movimentos' column to JSON strings to avoid pyarrow serialization errors
-    if 'movimentos' in df.columns:
-        import json
-        df = df.copy()
-        # Convert Timestamp objects inside 'movimentos' to string before json.dumps
-        def convert_timestamps(obj):
-            if isinstance(obj, list):
-                return [convert_timestamps(i) for i in obj]
-            elif hasattr(obj, 'isoformat'):
-                return obj.isoformat()
-            else:
-                return obj
-        df['movimentos'] = df['movimentos'].apply(lambda x: json.dumps(convert_timestamps(x)))
+    # compressão zstd para parquet
     df.to_parquet(parquet_path, compression='zstd', index=False)
     df.to_csv(csv_path, index=False)
     print(f'Dados salvos em:\n  • {parquet_path}\n  • {csv_path}')
@@ -287,40 +256,71 @@ def plot_horario(
     print(f'Gráfico salvo em {out_path}')
     plt.close()
 
-# ──────────────────────────────────────────────────────────────
-# CLI
-# ──────────────────────────────────────────────────────────────
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description='Pipeline de Jurimetria via API pública do CNJ'
     )
-    parser.add_argument('--tribunais', nargs='+',
-                        help='Lista de tribunais (ex.: TJCE TJSP).')
-    parser.add_argument('--classe-codigo', type=int, default=None,
-                        help='Código da classe (ex.: 12729).')
-    parser.add_argument('--classe', dest='classe_nome', type=str, default=None,
-                        help='Nome da classe (ex.: "Apelação Cível").')
-    parser.add_argument('--de', type=str, default=None,
-                        help='Data inicial (YYYY-MM-DD).')
-    parser.add_argument('--ate', type=str, default=None,
-                        help='Data final (YYYY-MM-DD).')
-    parser.add_argument('--max-processos', dest='max_processos',
-                        type=int, default=None,
-                        help='Máximo de processos a extrair.')
-    parser.add_argument('--log-level', dest='log_level',
-                        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
-                        default='INFO', help='Nível de log.')
+    parser.add_argument(
+        '--tribunais',
+        nargs='+',
+        help='Lista de tribunais (ex.: TJCE TJSP). Se omitido, padrão é TJCE.',
+    )
+    parser.add_argument(
+        '--classe-codigo',
+        dest='classe_codigo',
+        type=int,
+        default=None,
+        help='Código da classe (ex.: 12729).',
+    )
+    parser.add_argument(
+        '--classe',
+        dest='classe_nome',
+        type=str,
+        default=None,
+        help='Nome da classe (ex.: "Apelação Cível").',
+    )
+    parser.add_argument(
+        '--de',
+        dest='de',
+        type=str,
+        default=None,
+        help='Data inicial (YYYY-MM-DD).',
+    )
+    parser.add_argument(
+        '--ate',
+        dest='ate',
+        type=str,
+        default=None,
+        help='Data final (YYYY-MM-DD).',
+    )
+    parser.add_argument(
+        '--max-processos',
+        dest='max_processos',
+        type=int,
+        default=None,
+        help='Máximo de processos a extrair.',
+    )
+    parser.add_argument(
+        '--log-level',
+        dest='log_level',
+        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+        default='INFO',
+        help='Nível de log.',
+    )
+    # ignora flags não reconhecidas (ex.: pytest -q)
     args, _ = parser.parse_known_args()
 
+    # configura logging
     logging.basicConfig(
         level=getattr(logging, args.log_level),
         format='[%(levelname)s] %(message)s'
     )
 
     tribunais = args.tribunais if args.tribunais else DEFAULT_TRIBUNAIS
-    print(f'⏳ Coletando dados para: {", ".join(tribunais)} …')
 
     try:
+        print(f'⏳ Coletando dados para: {", ".join(tribunais)} …')
         df = build_dataframe(
             tribunais=tribunais,
             classe_codigo=args.classe_codigo,
@@ -331,7 +331,7 @@ def main() -> None:
         )
     except EnvironmentError as err:
         print(f'⚠️  {err}')
-        sys.exit(1)
+        return
 
     print(f'✔️  Total de processos: {len(df):,}')
     persist_df(df)
