@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import os
-import sys
 import argparse
 import logging
 from pathlib import Path
@@ -22,8 +21,8 @@ DEFAULT_TRIBUNAIS = ['TJCE']  # padrão quando nenhum tribunal é informado
 OUT_DIR = Path('dados_jurimetria').resolve()
 OUT_DIR.mkdir(exist_ok=True, parents=True)
 
-# Carrega lookup de municípios IBGE -> nome
-MUNICIPIOS_CSV = Path('data/municipios_ibge.csv')
+# Carrega lookup de municípios IBGE -> nome (coloque 'municipios_ibge.csv' na pasta src/)
+MUNICIPIOS_CSV = Path(__file__).parent / 'municipios_ibge.csv'
 if MUNICIPIOS_CSV.exists():
     try:
         _mun = pd.read_csv(MUNICIPIOS_CSV, dtype={'codigo_municipio_ibge': str})
@@ -88,7 +87,6 @@ def fetch_raw_hits(
     headers = get_headers()
     base_url = build_base_url(tribunal)
 
-    # Monta filtros
     filters: List[Dict[str, Any]] = []
     if classe_codigo is not None:
         filters.append({'term': {'classe.codigo': classe_codigo}})
@@ -102,10 +100,9 @@ def fetch_raw_hits(
             range_filter['lte'] = dt_fim
         filters.append({'range': {'dataAjuizamento': range_filter}})
 
+    query: Dict[str, Any] = {'match_all': {}}
     if filters:
-        query: Dict[str, Any] = {'bool': {'must': filters}}
-    else:
-        query = {'match_all': {}}
+        query = {'bool': {'must': filters}}
 
     payload_base: Dict[str, Any] = {
         'size': page_size,
@@ -156,7 +153,6 @@ def fetch_raw_hits(
 def parse_hit(hit: Dict[str, Any], tribunal: str) -> Dict[str, Any]:
     src = hit.get('_source', {})
 
-    # extrai código IBGE e faz lookup de nome de município
     cod_ibge = src.get('orgaoJulgador', {}).get('codigoMunicipioIBGE')
     nome_mun: Optional[str] = None
     if cod_ibge is not None:
@@ -176,9 +172,7 @@ def parse_hit(hit: Dict[str, Any], tribunal: str) -> Dict[str, Any]:
         'formato': src.get('formato', {}).get('nome'),
         'codigo': src.get('orgaoJulgador', {}).get('codigo'),
         'orgao_julgador': src.get('orgaoJulgador', {}).get('nome'),
-        # mantém o código para compatibilidade
         'municipio': cod_ibge,
-        # novo campo com o nome mapeado (ou None se não encontrado)
         'municipio_nome': nome_mun,
         'grau': src.get('grau'),
         'assuntos': lista_assuntos(src.get('assuntos', [])),
@@ -215,9 +209,11 @@ def persist_df(df: pd.DataFrame) -> None:
         print('Nenhum dado para persistir.')
         return
     parquet_path = OUT_DIR / 'jurimetria.parquet'
-    csv_path = OUT_DIR / 'jurimetria.csv'
-    # compressão zstd para parquet
-    df.to_parquet(parquet_path, compression='zstd', index=False)
+    csv_path    = OUT_DIR / 'jurimetria.csv'
+    # Se tiver pyarrow no requirements, mantenha compressão zstd:
+    # df.to_parquet(parquet_path, compression='zstd', index=False)
+    # Caso contrário, sem compressão:
+    df.to_parquet(parquet_path, index=False)
     df.to_csv(csv_path, index=False)
     print(f'Dados salvos em:\n  • {parquet_path}\n  • {csv_path}')
 
@@ -311,7 +307,6 @@ def main() -> None:
     # ignora flags não reconhecidas (ex.: pytest -q)
     args, _ = parser.parse_known_args()
 
-    # configura logging
     logging.basicConfig(
         level=getattr(logging, args.log_level),
         format='[%(levelname)s] %(message)s'
