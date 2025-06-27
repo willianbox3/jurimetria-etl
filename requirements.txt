@@ -5,3 +5,5 @@ pandas
 tqdm
 pytest
 matplotlib
+pyarrow
+fastparquet
