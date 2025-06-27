@@ -31,14 +31,6 @@ jobs:
             --max-processos 100 \
             --log-level DEBUG
 
-      - name: Debug: liste o conteúdo de saída
-        run: |
-          echo ">>> Estou em: $(pwd)"
-          echo ">>> Conteúdo do workspace:"
-          ls -l .
-          echo ">>> Conteúdo da pasta dados_jurimetria:"
-          ls -lh dados_jurimetria || echo ">> pasta vazia ou não existe"
-
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
