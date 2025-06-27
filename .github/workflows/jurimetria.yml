@@ -52,11 +52,12 @@ jobs:
 
       - name: Listar saída gerada
         run: |
-          echo ">>> conteúdo de $(pwd)/dados_jurimetria:"
+          echo ">>> Conteúdo de $(pwd)/dados_jurimetria:"
           ls -lh dados_jurimetria || echo "pasta vazia ou inexistente"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: dados-jurimetria
-          path: dados_jurimetria/*
+          path: dados_jurimetria/**
+
