@@ -50,14 +50,6 @@ jobs:
             --max-processos 100 \
             --log-level DEBUG
 
-      - name: Debug: listar saída
-        run: |
-          echo ">> pwd: $(pwd)"
-          echo ">> Conteúdo raiz:"
-          ls -l .
-          echo ">> Conteúdo pasta dados_jurimetria:"
-          ls -l dados_jurimetria || echo "pasta dados_jurimetria não existe"
-
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
