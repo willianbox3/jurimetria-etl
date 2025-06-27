@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import os
-import sys                        # ← adicionado
+import sys
+import os                        
 import argparse
 import logging
 from pathlib import Path
