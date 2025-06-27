@@ -9,11 +9,17 @@ jobs:
   etl:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.x'
-      - run: pip install -r requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
       - name: Run jurimetria pipeline
         env:
           CNJ_API_KEY: ${{ secrets.CNJ_API_KEY }}
@@ -24,10 +30,15 @@ jobs:
             --ate 2023-01-31 \
             --max-processos 100 \
             --log-level DEBUG
-      - name: Debug: liste o conteúdo
+
+      - name: Debug: liste o conteúdo de saída
         run: |
-          echo ">>> Conteúdo de dados_jurimetria:"
-          ls -lh dados_jurimetria || echo "vazio"
+          echo ">>> Estou em: $(pwd)"
+          echo ">>> Conteúdo do workspace:"
+          ls -l .
+          echo ">>> Conteúdo da pasta dados_jurimetria:"
+          ls -lh dados_jurimetria || echo ">> pasta vazia ou não existe"
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
