@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import os
-import sys
 import argparse
 import logging
 from pathlib import Path
@@ -88,7 +87,7 @@ def fetch_raw_hits(
     headers = get_headers()
     base_url = build_base_url(tribunal)
 
-    # montar filtros
+    # Monta filtros
     filters: List[Dict[str, Any]] = []
     if classe_codigo is not None:
         filters.append({'term': {'classe.codigo': classe_codigo}})
@@ -102,9 +101,8 @@ def fetch_raw_hits(
             range_filter['lte'] = dt_fim
         filters.append({'range': {'dataAjuizamento': range_filter}})
 
-    query: Dict[str, Any]
     if filters:
-        query = {'bool': {'must': filters}}
+        query: Dict[str, Any] = {'bool': {'must': filters}}
     else:
         query = {'match_all': {}}
 
@@ -134,7 +132,6 @@ def fetch_raw_hits(
         if resp.status_code == 404:
             break
         resp.raise_for_status()
-
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug("Response [%d]: %s", resp.status_code, resp.text)
 
@@ -142,7 +139,6 @@ def fetch_raw_hits(
         if not hits:
             break
 
-        # yield diretamente cada hit
         for hit in hits:
             yield hit
             retrieved += 1
@@ -158,7 +154,6 @@ def fetch_raw_hits(
 def parse_hit(hit: Dict[str, Any], tribunal: str) -> Dict[str, Any]:
     src = hit.get('_source', {})
 
-    # extrai código IBGE e faz lookup de nome de município
     cod_ibge = src.get('orgaoJulgador', {}).get('codigoMunicipioIBGE')
     nome_mun: Optional[str] = None
     if cod_ibge is not None:
@@ -178,9 +173,7 @@ def parse_hit(hit: Dict[str, Any], tribunal: str) -> Dict[str, Any]:
         'formato': src.get('formato', {}).get('nome'),
         'codigo': src.get('orgaoJulgador', {}).get('codigo'),
         'orgao_julgador': src.get('orgaoJulgador', {}).get('nome'),
-        # mantém o código para compatibilidade
         'municipio': cod_ibge,
-        # novo campo com o nome mapeado (ou None se não encontrado)
         'municipio_nome': nome_mun,
         'grau': src.get('grau'),
         'assuntos': lista_assuntos(src.get('assuntos', [])),
@@ -191,7 +184,7 @@ def parse_hit(hit: Dict[str, Any], tribunal: str) -> Dict[str, Any]:
 
 def build_dataframe(
     tribunais: List[str] = DEFAULT_TRIBUNAIS,
-    classe_codigo: Optional[int] = None,
+    classe_codigo: Optional[int] = CLASSE_CODIGO,
     classe_nome: Optional[str] = None,
     de: Optional[str] = None,
     ate: Optional[str] = None,
@@ -271,8 +264,8 @@ def main() -> None:
         '--classe-codigo',
         dest='classe_codigo',
         type=int,
-        default=None,
-        help='Código da classe (ex.: 12729).',
+        default=CLASSE_CODIGO,
+        help=f'Código da classe (padrão: {CLASSE_CODIGO}).',
     )
     parser.add_argument(
         '--classe',
@@ -312,13 +305,12 @@ def main() -> None:
     # ignora flags não reconhecidas (ex.: pytest -q)
     args, _ = parser.parse_known_args()
 
-    # configura logging
     logging.basicConfig(
         level=getattr(logging, args.log_level),
         format='[%(levelname)s] %(message)s'
     )
 
-    tribunais = args.tribunais if args.tribunais else DEFAULT_TRIBUNAIS
+    tribunais = args.tribunais or DEFAULT_TRIBUNAIS
 
     try:
         print(f'⏳ Coletando dados para: {", ".join(tribunais)} …')
@@ -332,7 +324,7 @@ def main() -> None:
         )
     except EnvironmentError as err:
         print(f'⚠️  {err}')
-        sys.exit(1)
+        return
 
     print(f'✔️  Total de processos: {len(df):,}')
     persist_df(df)
