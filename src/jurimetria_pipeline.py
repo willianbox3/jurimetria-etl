@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import sys
 import os
 import argparse
 import logging
@@ -12,6 +13,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import requests
+from requests.exceptions import HTTPError
 
 CLASSE_CODIGO = 12729  # ANPP – mantido como padrão
 PAGE_SIZE = 1000
@@ -94,15 +96,19 @@ def fetch_raw_hits(
     if classe_nome:
         filters.append({'term': {'classe.nome.keyword': classe_nome}})
     if dt_ini or dt_fim:
-        rf: Dict[str, Any] = {}
+        range_filter: Dict[str, Any] = {}
         if dt_ini:
-            rf['gte'] = dt_ini
+            range_filter['gte'] = dt_ini
         if dt_fim:
-            rf['lte'] = dt_fim
-        filters.append({'range': {'dataAjuizamento': rf}})
+            range_filter['lte'] = dt_fim
+        filters.append({'range': {'dataAjuizamento': range_filter}})
 
-    query = {'bool': {'must': filters}} if filters else {'match_all': {}}
-    payload_base = {
+    if filters:
+        query: Dict[str, Any]] = {'bool': {'must': filters}}
+    else:
+        query = {'match_all': {}}
+
+    payload_base: Dict[str, Any]] = {
         'size': page_size,
         'query': query,
         'sort': [
@@ -141,10 +147,10 @@ def fetch_raw_hits(
             if max_processos is not None and retrieved >= max_processos:
                 return
 
-        new_sa = hits[-1].get('sort')
-        if new_sa == search_after:
+        new_search_after = hits[-1].get('sort')
+        if new_search_after == search_after:
             break
-        search_after = new_sa
+        search_after = new_search_after
 
 
 def parse_hit(hit: Dict[str, Any], tribunal: str) -> Dict[str, Any]:
@@ -196,18 +202,22 @@ def build_dataframe(
         ]
         if registros:
             frames.append(pd.DataFrame(registros))
-    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
 
 
 def persist_df(df: pd.DataFrame) -> None:
-    if df.empty:
-        print('Nenhum dado para persistir.')
-        return
     parquet_path = OUT_DIR / 'jurimetria.parquet'
-    csv_path = OUT_DIR / 'jurimetria.csv'
+    csv_path     = OUT_DIR / 'jurimetria.csv'
+    # grava sempre, mesmo que vazio
     df.to_parquet(parquet_path, compression='zstd', index=False)
     df.to_csv(csv_path, index=False)
-    print(f'Dados salvos em:\n  • {parquet_path}\n  • {csv_path}')
+    if df.empty:
+        print('⚠️ DataFrame vazio, mas arquivos vazios foram gerados:')
+    else:
+        print('Dados salvos em:')
+    print(f'  • {parquet_path}\n  • {csv_path}')
 
 
 def plot_horario(
@@ -252,7 +262,7 @@ def main() -> None:
     parser.add_argument(
         '--tribunais',
         nargs='+',
-        help='Lista de tribunais (ex.: TJCE TJSP).',
+        help='Lista de tribunais (ex.: TJCE TJSP). Se omitido, padrão é TJCE.',
     )
     parser.add_argument(
         '--classe-codigo',
@@ -265,67 +275,5 @@ def main() -> None:
         '--classe',
         dest='classe_nome',
         type=str,
-        help='Nome da classe (ex.: "Apelação Cível").',
-    )
-    parser.add_argument(
-        '--de',
-        dest='de',
-        type=str,
-        help='Data inicial (YYYY-MM-DD).',
-    )
-    parser.add_argument(
-        '--ate',
-        dest='ate',
-        type=str,
-        help='Data final (YYYY-MM-DD).',
-    )
-    parser.add_argument(
-        '--max-processos',
-        dest='max_processos',
-        type=int,
-        help='Máximo de processos a extrair.',
-    )
-    parser.add_argument(
-        '--log-level',
-        dest='log_level',
-        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
-        default='INFO',
-        help='Nível de log.',
-    )
-
-    # ignora flags não reconhecidas (ex.: pytest -q)
-    args, _ = parser.parse_known_args()
-
-    logging.basicConfig(
-        level=getattr(logging, args.log_level),
-        format='[%(levelname)s] %(message)s'
-    )
-
-    tribunais = args.tribunais or DEFAULT_TRIBUNAIS
-
-    try:
-        print(f'⏳ Coletando dados para: {", ".join(tribunais)} …')
-        df = build_dataframe(
-            tribunais=tribunais,
-            classe_codigo=args.classe_codigo,
-            classe_nome=args.classe_nome,
-            de=args.de,
-            ate=args.ate,
-            max_processos=args.max_processos,
-        )
-    except EnvironmentError as e:
-        print(f'⚠️  {e}')
-        return      # <--- aqui não usa sys.exit()
-
-    print(f'✔️  Total de processos: {len(df):,}')
-    persist_df(df)
-
-    if not df.empty:
-        assuntos_top = df['assuntos'].explode().value_counts().head()
-        print('\nTop-5 assuntos:\n', assuntos_top, sep='')
-
-    plot_horario(df, args.classe_nome, args.classe_codigo)
-
-
-if __name__ == '__main__':
-    main()
+        default=None,
+        help='Nome da classe (ex.: "Apela
