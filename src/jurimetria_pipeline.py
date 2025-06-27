@@ -172,13 +172,6 @@ def parse_hit(hit: Dict[str, Any], tribunal: str) -> Dict[str, Any]:
         'codigo': src.get('orgaoJulgador', {}).get('codigo'),
         'orgao_julgador': src.get('orgaoJulgador', {}).get('nome'),
         'municipio': src.get('orgaoJulgador', {}).get('codigoMunicipioIBGE'),
-         nome = MUNICIPIOS.loc[str(cod), "nome_municipio"] if cod and str(cod) in MUNICIPIOS.index else None
-    return {
-        …
-        "municipio_codigo_ibge": cod,
-        "municipio": nome,
-        …
-    }
         'grau': src.get('grau'),
         'assuntos': lista_assuntos(src.get('assuntos', [])),
         'movimentos': lista_movimentos(src.get('movimentos', [])),
