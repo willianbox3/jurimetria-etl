@@ -13,6 +13,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import requests
+from pathlib import Path
 
 # ──────────────────────────────────────────────────────────────
 # CONFIGURAÇÃO BÁSICA
@@ -22,6 +23,14 @@ PAGE_SIZE = 1000
 DEFAULT_TRIBUNAIS = ['TJCE']   # padrão quando nenhum tribunal é informado
 OUT_DIR = Path('dados_jurimetria').resolve()
 OUT_DIR.mkdir(exist_ok=True, parents=True)
+
+# extrai o código IBGE e tenta lookup do nome
+    cod_ibge = src.get('orgaoJulgador', {}).get('codigoMunicipioIBGE')
+    nome_mun = None
+    if cod_ibge is not None:
+        cod_str = str(cod_ibge)
+        if cod_str in _mun.index:
+            nome_mun = _mun.loc[cod_str, "nome_municipio"]
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +170,13 @@ def parse_hit(hit: Dict[str, Any], tribunal: str) -> Dict[str, Any]:
     src = hit.get('_source', {})
     data_ajuizamento = tz_utc_to_sp(src.get('dataAjuizamento'))
     ultima_atualizacao = tz_utc_to_sp(src.get('dataHoraUltimaAtualizacao'))
+    # extrai o código IBGE e tenta lookup do nome
+    cod_ibge = src.get('orgaoJulgador', {}).get('codigoMunicipioIBGE')
+    nome_mun = None
+    if cod_ibge is not None:
+        cod_str = str(cod_ibge)
+        if cod_str in _mun.index:
+            nome_mun = _mun.loc[cod_str, "nome_municipio"]
 
     return {
         'tribunal': tribunal,
@@ -172,6 +188,8 @@ def parse_hit(hit: Dict[str, Any], tribunal: str) -> Dict[str, Any]:
         'codigo': src.get('orgaoJulgador', {}).get('codigo'),
         'orgao_julgador': src.get('orgaoJulgador', {}).get('nome'),
         'municipio': src.get('orgaoJulgador', {}).get('codigoMunicipioIBGE'),
+        'municipio_codigo_ibge': cod_ibge,
+        'municipio': nome_mun,
         'grau': src.get('grau'),
         'assuntos': lista_assuntos(src.get('assuntos', [])),
         'movimentos': lista_movimentos(src.get('movimentos', [])),
