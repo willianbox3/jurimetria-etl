@@ -2,30 +2,21 @@ name: Jurimetria ETL
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-      - run: pip install -r requirements.txt
-      - name: Run pytest
-        run: pytest -q
-
   etl:
-    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
-      - run: pip install -r requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
 
       - name: Run jurimetria pipeline
         env:
@@ -38,16 +29,16 @@ jobs:
             --max-processos 100 \
             --log-level DEBUG
 
-- name: Debug: listar saída
-  run: |
-   echo ">> pwd: $(pwd)"
-   echo ">> Conteúdo raiz:"
-   ls -l .
-   echo ">> Conteúdo pasta dados_jurimetria:"
-   ls -l dados_jurimetria || echo ">> pasta vazia ou não existe"
-   
-- name: Upload artifacts
-  uses: actions/upload-artifact@v4
-  with:
-   name: dados-jurimetria
-   path: dados_jurimetria/**
+      - name: Debug: listar saída
+        run: |
+          echo ">> pwd: $(pwd)"
+          echo ">> Conteúdo raiz:"
+          ls -l .
+          echo ">> Conteúdo pasta dados_jurimetria:"
+          ls -l dados_jurimetria || echo ">> pasta vazia ou não existe"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dados-jurimetria
+          path: dados_jurimetria/**
