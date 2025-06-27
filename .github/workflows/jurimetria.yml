@@ -2,25 +2,18 @@ name: Jurimetria ETL
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
   etl:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
+      - run: pip install -r requirements.txt
       - name: Run jurimetria pipeline
         env:
           CNJ_API_KEY: ${{ secrets.CNJ_API_KEY }}
@@ -31,7 +24,10 @@ jobs:
             --ate 2023-01-31 \
             --max-processos 100 \
             --log-level DEBUG
-     
+      - name: Debug: liste o conteúdo
+        run: |
+          echo ">>> Conteúdo de dados_jurimetria:"
+          ls -lh dados_jurimetria || echo "vazio"
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
