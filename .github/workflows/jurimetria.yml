@@ -1,15 +1,29 @@
+name: Jurimetria ETL
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
 jobs:
-  etl:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-
+        with: { python-version: '3.x' }
       - run: pip install -r requirements.txt
+      - name: Run pytest
+        run: pytest -q
 
+  etl:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.x' }
+      - run: pip install -r requirements.txt
       - name: Run jurimetria pipeline
         env:
           CNJ_API_KEY: ${{ secrets.CNJ_API_KEY }}
@@ -20,15 +34,11 @@ jobs:
             --ate 2023-01-31 \
             --max-processos 100 \
             --log-level DEBUG
-
-      - name: Debug: liste o workspace e a pasta de saída
+      - name: Debug: liste diretórios
         run: |
-          echo ">> pwd: $(pwd)"
-          echo ">> root contents:"
-          ls -l .
-          echo ">> dados_jurimetria contents:"
-          ls -l dados_jurimetria || echo ">> pasta não existe ou está vazia"
-
+          pwd
+          ls -R .
+          ls -R dados_jurimetria || echo "pasta vazia"
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
