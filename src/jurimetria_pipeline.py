@@ -255,7 +255,11 @@ def main() -> None:
     logging.basicConfig(level=getattr(logging, args.log_level),
                         format='[%(levelname)s] %(message)s')
 
-    tribunais = args.tribunais or DEFAULT_TRIBUNAIS
+    # se não passou --classe-codigo nem --classe, usar o padrão ANPP
+    if args.classe_codigo is None and args.classe_nome is None:
+        args.classe_codigo = CLASSE_CODIGO
+
+    tribunais = args.tribunais if args.tribunais else DEFAULT_TRIBUNAIS
 
     try:
         print(f'⏳ Coletando dados para: {", ".join(tribunais)} …')
