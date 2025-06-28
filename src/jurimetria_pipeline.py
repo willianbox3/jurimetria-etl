@@ -5,7 +5,6 @@ import os
 import sys
 import argparse
 import logging
-from pathlib import Path
 from typing import Generator, List, Dict, Any, Optional
 
 import pandas as pd
@@ -22,16 +21,6 @@ DEFAULT_TRIBUNAIS = ['TJCE']  # padrão quando nenhum tribunal é informado
 OUT_DIR = Path('dados_jurimetria').resolve()
 OUT_DIR.mkdir(exist_ok=True, parents=True)
 
-# Carrega lookup de municípios IBGE -> nome
-MUNICIPIOS_CSV = Path('data/municipios_ibge.csv')
-if MUNICIPIOS_CSV.exists():
-    try:
-        _mun = pd.read_csv(MUNICIPIOS_CSV, dtype={'codigo_municipio_ibge': str})
-        _mun.set_index('codigo_municipio_ibge', inplace=True)
-    except Exception:
-        _mun = pd.DataFrame()
-else:
-    _mun = pd.DataFrame()
 
 logger = logging.getLogger(__name__)
 
@@ -156,18 +145,7 @@ def fetch_raw_hits(
 def parse_hit(hit: Dict[str, Any], tribunal: str) -> Dict[str, Any]:
     src = hit.get('_source', {})
 
-    # extrai código IBGE e faz lookup de nome de município
-    cod_ibge = src.get('orgaoJulgador', {}).get('codigoMunicipioIBGE')
-    nome_mun: Optional[str] = None
-    if cod_ibge is not None:
-        cod_str = str(cod_ibge)
-        if not _mun.empty and cod_str in _mun.index:
-            try:
-                nome_mun = _mun.loc[cod_str, 'nome_municipio']
-            except Exception:
-                nome_mun = None
-
-    return {
+    
         'tribunal': tribunal,
         'numero_processo': src.get('numeroProcesso'),
         'classe': src.get('classe', {}).get('nome'),
@@ -176,10 +154,7 @@ def parse_hit(hit: Dict[str, Any], tribunal: str) -> Dict[str, Any]:
         'formato': src.get('formato', {}).get('nome'),
         'codigo': src.get('orgaoJulgador', {}).get('codigo'),
         'orgao_julgador': src.get('orgaoJulgador', {}).get('nome'),
-        # mantém o código para compatibilidade
-        'municipio': cod_ibge,
-        # novo campo com o nome mapeado (ou None se não encontrado)
-        'municipio_nome': nome_mun,
+        'municipio': src.get('orgaoJulgador', {}).get('codigoMunicipioIBGE'),
         'grau': src.get('grau'),
         'assuntos': lista_assuntos(src.get('assuntos', [])),
         'movimentos': lista_movimentos(src.get('movimentos', [])),
