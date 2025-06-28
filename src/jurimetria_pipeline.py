@@ -270,7 +270,7 @@ def main() -> None:
                         format='[%(levelname)s] %(message)s')
 
     tribunais = args.tribunais or DEFAULT_TRIBUNAIS
- try:
+    try:
         print(f'⏳ Coletando dados para: {", ".join(tribunais)} …')
         df = build_dataframe(
             tribunais=tribunais,
