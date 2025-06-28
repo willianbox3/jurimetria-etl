@@ -17,7 +17,7 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-            - name: Run jurimetria pipeline
+      - name: Run jurimetria pipeline
         env:
           CNJ_API_KEY: ${{ secrets.CNJ_API_KEY }}
         run: |
