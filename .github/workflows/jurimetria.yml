@@ -25,13 +25,18 @@ jobs:
         env:
           CNJ_API_KEY: ${{ secrets.CNJ_API_KEY }}
         run: |
+            --ate 2023-02-28 \
+            --max-processos 100 \
+>>>>>>> 025ea134279f977d093cf1ffae0179c8cd6b6d54
+            --log-level DEBUG
+=======
           python src/jurimetria_pipeline.py \
             --tribunais TJCE TJSP \
             --classe-codigo 12729 \
             --de 2023-01-01 \
-<<<<<<< HEAD
             --ate 2023-06-30 \
             --max-processos 500 \
+            --log-level DEBUG
 =======
             --ate 2023-02-28 \
             --max-processos 100 \
