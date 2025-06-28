@@ -144,8 +144,6 @@ def fetch_raw_hits(
 
 def parse_hit(hit: Dict[str, Any], tribunal: str) -> Dict[str, Any]:
     src = hit.get('_source', {})
-
-    
         'tribunal': tribunal,
         'numero_processo': src.get('numeroProcesso'),
         'classe': src.get('classe', {}).get('nome'),
