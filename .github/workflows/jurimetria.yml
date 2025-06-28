@@ -2,20 +2,24 @@ name: Jurimetria ETL
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
   etl:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.x'
 
-      - run: pip install -r requirements.txt
+      - name: Install dependencies
+        run: pip install -r requirements.txt
 
       - name: Run jurimetria pipeline
         env:
@@ -25,12 +29,13 @@ jobs:
             --tribunais TJCE \
             --de 2023-01-01 \
             --ate 2023-02-28 \
-            --max-processos 200 \
+            --max-processos 100 \
             --log-level DEBUG
 
-      - name: Listar arquivos criados
+      - name: Listar saída
         run: |
-          ls -lR dados_jurimetria || echo "Diretório não existe"
+          echo "Conteúdo de dados_jurimetria:"
+          ls -R dados_jurimetria
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
