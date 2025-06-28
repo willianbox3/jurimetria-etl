@@ -1,293 +1,352 @@
-#!/usr/bin/env python3
+# src/jurimetria_pipeline.py
 from __future__ import annotations
-
-import sys
-import os
 import argparse
 import logging
+import os
+import sys
 from pathlib import Path
-from typing import Generator, List, Dict, Any, Optional
+from typing import Any, Dict, Generator, List, Optional
 
 import pandas as pd
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 import requests
-from requests.exceptions import HTTPError
+from dotenv import load_dotenv
 
-CLASSE_CODIGO = 12729
-PAGE_SIZE = 1000
-DEFAULT_TRIBUNAIS = ['TJCE']
+# ─────────────────────────── Configuração ────────────────────────────
+load_dotenv()
+import sys
 
-# Diretório de saída
-OUT_DIR = Path('dados_jurimetria').resolve()
-OUT_DIR.mkdir(exist_ok=True, parents=True)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
+log = logging.getLogger(__name__)
 
-# Carrega lookup de municípios IBGE -> nome
-MUNICIPIOS_CSV = Path('data/municipios_ibge.csv')
-if MUNICIPIOS_CSV.exists():
-    try:
-        _mun = pd.read_csv(MUNICIPIOS_CSV, dtype={'codigo_municipio_ibge': str})
-        _mun.set_index('codigo_municipio_ibge', inplace=True)
-    except Exception:
-        _mun = pd.DataFrame()
-else:
-    _mun = pd.DataFrame()
+def set_log_level(level_name: str) -> None:
+    level = getattr(logging, level_name.upper(), None)
+    if not isinstance(level, int):
+        log.error(f"Invalid log level: {level_name}")
+        sys.exit(1)
+    logging.getLogger().setLevel(level)
 
-logger = logging.getLogger(__name__)
+CLASSE_CODIGO_DEFAULT = 12729          # ANPP – mantido como fallback
+PAGE_SIZE = 1_000
+DEFAULT_TRIBUNAIS = ["TJCE"]           # padrão: TJCE
+OUT_DIR = Path("dados_jurimetria").resolve()
+OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
+# ──────────────────────────── Utilidades ─────────────────────────────
 def get_headers() -> Dict[str, str]:
-    api_key = os.getenv('CNJ_API_KEY')
+    # Hardcoded API key to avoid environment variable error
+    api_key = "APIKey cDZHYzlZa0JadVREZDJCendQbXY6SkJlTzNjLV9TRENyQk1RdnFKZGRQdw=="
     if not api_key:
-        raise EnvironmentError(
-            'Defina a variável de ambiente CNJ_API_KEY antes de executar o script.'
-        )
-    if not api_key.lower().startswith('apikey'):
-        api_key = f'APIKey {api_key}'
-    return {'Authorization': api_key, 'Content-Type': 'application/json'}
+        raise EnvironmentError("Defina a variável de ambiente CNJ_API_KEY antes de executar o script.")
+    if not api_key.lower().startswith("apikey"):
+        api_key = f"APIKey {api_key}"
+    return {"Authorization": api_key, "Content-Type": "application/json"}
 
 
-def build_base_url(tribunal: str) -> str:
-    return f'https://api-publica.datajud.cnj.jus.br/api_publica_{tribunal.lower()}/_search'
+def build_base_url(sigla: str) -> str:
+    """Monta o endpoint do índice público de cada tribunal (api_publica_<sigla>)."""
+    return f"https://api-publica.datajud.cnj.jus.br/api_publica_{sigla.lower()}/_search"
 
+
+import pandas._libs.tslibs.np_datetime as np_datetime
 
 def tz_utc_to_sp(dt_str: Optional[str]) -> Optional[pd.Timestamp]:
     if not dt_str:
         return None
-    ts = pd.to_datetime(dt_str, utc=True)
-    return ts.tz_convert('America/Sao_Paulo')
+    try:
+        ts = pd.to_datetime(dt_str, utc=True)
+        return ts.tz_convert("America/Sao_Paulo")
+    except np_datetime.OutOfBoundsDatetime:
+        return None
 
 
-def lista_assuntos(raw_assuntos: List[Dict[str, Any]]) -> List[str]:
-    return [a.get('nome', '') for a in raw_assuntos]
+def lista_assuntos(raw: List[Dict[str, Any]]) -> List[str]:
+    nomes = []
+    for a in raw:
+        if isinstance(a, dict):
+            nomes.append(a.get("nome", ""))
+        elif isinstance(a, list) and len(a) > 0:
+            first = a[0]
+            if isinstance(first, dict):
+                nomes.append(first.get("nome", ""))
+            else:
+                nomes.append("")
+        else:
+            nomes.append("")
+    return nomes
 
 
-def lista_movimentos(raw_movs: List[Dict[str, Any]]) -> List[List[Any]]:
+def lista_movimentos(raw: List[Dict[str, Any]]) -> List[List[Any]]:
     movs: List[List[Any]] = []
-    for mov in raw_movs:
-        codigo = mov.get('codigo')
-        nome = mov.get('nome')
-        data_parsed = tz_utc_to_sp(mov.get('dataHora'))
-        movs.append([codigo, nome, data_parsed])
-    default_ts = pd.Timestamp('1970-01-01', tz='America/Sao_Paulo')
-    return sorted(movs, key=lambda x: x[2] or default_ts)
+    for m in raw:
+        movs.append([m.get("codigo"), m.get("nome"), tz_utc_to_sp(m.get("dataHora"))])
+    default = pd.Timestamp("1970-01-01", tz="America/Sao_Paulo")
+    return sorted(movs, key=lambda x: x[2] or default)
+
+
+# ────────────────────── Consulta ao DataJud ──────────────────────────
+def _build_query(classe_codigo: Optional[int], classe_nome: Optional[str]) -> Dict[str, Any]:
+    if classe_nome:
+        # tenta primeiro pelo nome; se der 400 o chamador tratará
+        return {"term": {"classe.nome": classe_nome}}
+    if classe_codigo:
+        return {"term": {"classe.codigo": classe_codigo}}
+    # No class filter
+    return {"match_all": {}}
 
 
 def fetch_raw_hits(
     tribunal: str,
-    classe_codigo: Optional[int] = CLASSE_CODIGO,
+    classe_codigo: Optional[int] = None,
     classe_nome: Optional[str] = None,
-    dt_ini: Optional[str] = None,
-    dt_fim: Optional[str] = None,
     page_size: int = PAGE_SIZE,
-    max_processos: Optional[int] = None,
 ) -> Generator[Dict[str, Any], None, None]:
+    """Paginação `search_after` sobre o índice público de cada tribunal."""
     headers = get_headers()
-    base_url = build_base_url(tribunal)
+    url = build_base_url(tribunal)
 
-    # normaliza datas para ISO completo
-    if dt_ini and len(dt_ini) == 10:
-        dt_ini = dt_ini + "T00:00:00Z"
-    if dt_fim and len(dt_fim) == 10:
-        dt_fim = dt_fim + "T23:59:59Z"
-
-    def montar_query(codigo: Optional[int], usar_data: bool) -> Dict[str, Any]:
-        filtros: List[Dict[str, Any]] = []
-        if codigo is not None:
-            filtros.append({'term': {'classe.codigo': codigo}})
-        if classe_nome:
-            filtros.append({'term': {'classe.nome.keyword': classe_nome}})
-        if usar_data and (dt_ini or dt_fim):
-            rng: Dict[str, Any] = {}
-            if dt_ini: rng['gte'] = dt_ini
-            if dt_fim: rng['lte'] = dt_fim
-            filtros.append({'range': {'dataAjuizamento': rng}})
-        return {'bool': {'must': filtros}} if filtros else {'match_all': {}}
-
-    retrieved = 0
-    search_after: Optional[List[Any]] = None
-    tentou_sem_classe = False
-    tentou_sem_data = False
-
-    while True:
-        # determina se remove filtro de classe ou data
-        usar_classe = not tentou_sem_classe
-        usar_data = not tentou_sem_data
-        payload = {
-            'size': page_size,
-            'query': montar_query(classe_codigo if usar_classe else None, usar_data),
-            'sort': [
-                {'dataAjuizamento': {'order': 'desc'}},
-                {'_id': 'asc'}
+    def do_request(query_nome: Optional[str], query_codigo: Optional[int]) -> Generator[Dict[str, Any], None, None]:
+        base_payload = {
+            "size": page_size,
+            "query": _build_query(query_codigo, query_nome),
+            "sort": [
+                {"dataAjuizamento": {"order": "desc"}}
             ],
         }
-        if search_after is not None:
-            payload['search_after'] = search_after
-
-        if logger.isEnabledFor(logging.DEBUG):
-            logger.debug("Request payload: %s", payload)
-        else:
-            logger.info("Buscando %d processos em %s...", page_size, tribunal)
-
-        try:
-            resp = requests.post(base_url, headers=headers, json=payload, timeout=60)
-            resp.raise_for_status()
-        except HTTPError as err:
-            status = err.response.status_code if err.response else None
-
-            # 1º fallback: sem classe
-            if status == 400 and usar_classe:
-                logger.warning(f"{tribunal}: filtro de classe não suportado, removendo.")
-                tentou_sem_classe = True
-                continue
-            # 2º fallback: sem data
-            if status == 400 and usar_data:
-                logger.warning(f"{tribunal}: filtro de data gerou 400, removendo.")
-                tentou_sem_data = True
-                continue
-
-            logger.error(f"{tribunal}: falha irreversível na API ({status}), abortando.")
-            break
-
-        hits = resp.json().get('hits', {}).get('hits', [])
-        if not hits:
-            break
-
-        for hit in hits:
-            yield hit
-            retrieved += 1
-            if max_processos is not None and retrieved >= max_processos:
+        search_after: Optional[List[Any]] = None
+        while True:
+            payload = dict(base_payload)
+            if search_after:
+                payload["search_after"] = search_after
+            log.debug(f"Enviando payload para {tribunal}: {payload}")
+            try:
+                resp = requests.post(url, headers=headers, json=payload, timeout=60)
+                log.debug(f"Request headers: {resp.request.headers}")
+                log.debug(f"Request body: {resp.request.body}")
+                log.debug(f"Response status: {resp.status_code}")
+                log.debug(f"Response headers: {resp.headers}")
+                log.debug(f"Response body: {resp.text}")
+            except Exception as e:
+                log.error(f"Erro na requisição para {tribunal}: {e}")
                 return
 
-        # paginação
-        nova_sa = hits[-1].get('sort')
-        if nova_sa == search_after:
-            break
-        search_after = nova_sa
+            if resp.status_code in (400, 404):
+                log.warning("Tribunal %s retornou %s – pulando.", tribunal, resp.status_code)
+                return
+
+            resp.raise_for_status()
+            hits = resp.json().get("hits", {}).get("hits", [])
+            if not hits:
+                return
+
+            yield from hits
+            new_cursor = hits[-1]["sort"]
+            if new_cursor == search_after:
+                return
+            search_after = new_cursor
+
+    # Try querying by class name first if provided
+    if classe_nome:
+        results = list(do_request(classe_nome, None))
+        if results:
+            yield from results
+            return
+        else:
+            log.info(f"Consulta por nome de classe '{classe_nome}' não retornou resultados ou falhou, tentando por código.")
+    # Fallback to querying by class code
+    if classe_codigo:
+        results = list(do_request(None, classe_codigo))
+        if results:
+            yield from results
+            return
+        else:
+            log.info(f"Consulta por código de classe '{classe_codigo}' não retornou resultados ou falhou, tentando sem filtro de classe.")
+    # Fallback to querying without class filter
+    yield from do_request(None, None)
 
 
 def parse_hit(hit: Dict[str, Any], tribunal: str) -> Dict[str, Any]:
-    src = hit.get('_source', {})
-
-    cod_ibge = src.get('orgaoJulgador', {}).get('codigoMunicipioIBGE')
-    nome_mun: Optional[str] = None
-    if cod_ibge is not None:
-        cod_str = str(cod_ibge)
-        if not _mun.empty and cod_str in _mun.index:
-            nome_mun = _mun.loc[cod_str, 'nome_municipio']
-
+    src = hit["_source"]
     return {
-        'tribunal': tribunal,
-        'numero_processo': src.get('numeroProcesso'),
-        'classe': src.get('classe', {}).get('nome'),
-        'data_ajuizamento': tz_utc_to_sp(src.get('dataAjuizamento')),
-        'ultima_atualizacao': tz_utc_to_sp(src.get('dataHoraUltimaAtualizacao')),
-        'formato': src.get('formato', {}).get('nome'),
-        'codigo': src.get('orgaoJulgador', {}).get('codigo'),
-        'orgao_julgador': src.get('orgaoJulgador', {}).get('nome'),
-        'municipio': cod_ibge,
-        'municipio_nome': nome_mun,
-        'grau': src.get('grau'),
-        'assuntos': lista_assuntos(src.get('assuntos', [])),
-        'movimentos': lista_movimentos(src.get('movimentos', [])),
-        'sort': hit.get('sort', [None])[0],
+        "tribunal": tribunal,
+        "numero_processo": src.get("numeroProcesso"),
+        "classe": src.get("classe", {}).get("nome"),
+        "data_ajuizamento": tz_utc_to_sp(src.get("dataAjuizamento")),
+        "ultima_atualizacao": tz_utc_to_sp(src.get("dataHoraUltimaAtualizacao")),
+        "formato": src.get("formato", {}).get("nome"),
+        "codigo_orgao": src.get("orgaoJulgador", {}).get("codigo"),
+        "orgao_julgador": src.get("orgaoJulgador", {}).get("nome"),
+        "municipio": src.get("orgaoJulgador", {}).get("codigoMunicipioIBGE"),
+        "grau": src.get("grau"),
+        "assuntos": lista_assuntos(src.get("assuntos", [])),
+        "movimentos": lista_movimentos(src.get("movimentos", [])),
+        "sort": hit.get("sort", [None])[0],
     }
 
 
+from datetime import datetime
+import pytz
+
 def build_dataframe(
-    tribunais: List[str] = DEFAULT_TRIBUNAIS,
-    classe_codigo: Optional[int] = CLASSE_CODIGO,
+    tribunais: List[str],
+    classe_codigo: Optional[int] = None,
     classe_nome: Optional[str] = None,
     de: Optional[str] = None,
     ate: Optional[str] = None,
     max_processos: Optional[int] = None,
 ) -> pd.DataFrame:
     frames: List[pd.DataFrame] = []
+    total_processos = 0
+    tz = pytz.timezone("America/Sao_Paulo")
+    de_dt = tz.localize(datetime.strptime(de, "%Y-%m-%d")) if de else None
+    ate_dt = tz.localize(datetime.strptime(ate, "%Y-%m-%d")) if ate else None
+
+    def dentro_do_periodo(data: Optional[pd.Timestamp]) -> bool:
+        if data is None:
+            return True
+        if de_dt and data < de_dt:
+            return False
+        if ate_dt and data > ate_dt:
+            return False
+        return True
+
     for trib in tribunais:
-        regs = [
-            parse_hit(h, trib)
-            for h in fetch_raw_hits(
-                trib, classe_codigo, classe_nome, de, ate, PAGE_SIZE, max_processos
-            )
-        ]
-        if regs:
-            frames.append(pd.DataFrame(regs))
+        registros = []
+        for h in fetch_raw_hits(trib, classe_codigo, classe_nome):
+            parsed = parse_hit(h, trib)
+            if dentro_do_periodo(parsed.get("data_ajuizamento")):
+                registros.append(parsed)
+                total_processos += 1
+                if max_processos and total_processos >= max_processos:
+                    break
+        if registros:
+            frames.append(pd.DataFrame(registros))
+        if max_processos and total_processos >= max_processos:
+            break
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
+# ─────────────────────── Persistência & gráfico ──────────────────────
+import json
+
 def persist_df(df: pd.DataFrame) -> None:
-    parquet_path = OUT_DIR / 'jurimetria.parquet'
-    csv_path = OUT_DIR / 'jurimetria.csv'
-    # mesmo que df esteja vazio, esses dois arquivos serão criados (podendo ser vazios)
-    df.to_parquet(parquet_path, compression='zstd', index=False)
-    df.to_csv(csv_path, index=False)
-    print(f'Dados salvos em:\n  • {csv_path}\n  • {parquet_path}')
-
-
-def plot_horario(df: pd.DataFrame, classe_nome: Optional[str], classe_codigo: Optional[int]) -> None:
     if df.empty:
-        print('Nenhum dado para plotar.')
+        print("Nenhum dado para persistir.")
         return
+    parquet = OUT_DIR / "jurimetria.parquet"
+    csv = OUT_DIR / "jurimetria.csv"
+    # Serialize 'movimentos' column to JSON strings to avoid pyarrow conversion errors
+    if "movimentos" in df.columns:
+        df = df.copy()
+        def serialize_movimentos(movs):
+            if not isinstance(movs, list):
+                return movs
+            new_movs = []
+            for item in movs:
+                new_item = []
+                for elem in item:
+                    if hasattr(elem, "isoformat"):
+                        new_item.append(elem.isoformat())
+                    else:
+                        new_item.append(elem)
+                new_movs.append(new_item)
+            return new_movs
+        df["movimentos"] = df["movimentos"].apply(serialize_movimentos).apply(json.dumps)
+    df.to_parquet(parquet, compression="zstd", index=False)
+    df.to_csv(csv, index=False)
+    print(f"Dados salvos em:\n  • {parquet}\n  • {csv}")
 
+
+def plot_horario(df: pd.DataFrame) -> None:
+    if df.empty or "data_ajuizamento" not in df.columns:
+        return
     horas = (
-        pd.to_datetime(df['data_ajuizamento'], utc=True, errors='coerce')
-        .dropna().dt.tz_convert('America/Sao_Paulo').dt.hour
+        pd.to_datetime(df["data_ajuizamento"], utc=True, errors="coerce")
+        .dropna()
+        .dt.tz_convert("America/Sao_Paulo")
+        .dt.hour
     )
     if horas.empty:
-        print('Nenhum dado válido de horário para plotar.')
         return
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
 
-    contagem = horas.value_counts().sort_index()
+    cont = horas.value_counts().sort_index()
     plt.figure(figsize=(12, 6))
-    contagem.plot(kind='bar')
-    plt.title(f"Horário de ajuizamento – classe {classe_nome or classe_codigo}")
-    plt.xlabel('Hora do dia')
-    plt.ylabel('Número de ajuizamentos')
-    plt.grid(axis='y', alpha=0.4)
+    cont.plot(kind="bar")
+    plt.title("Horário de ajuizamento")
+    plt.xlabel("Hora do dia")
+    plt.ylabel("Processos")
     plt.tight_layout()
-
-    out_path = OUT_DIR / 'horario_jurimetria.jpg'
-    plt.savefig(out_path, dpi=150)
-    print(f'Gráfico salvo em {out_path}')
+    out = OUT_DIR / "horario_jurimetria.jpg"
+    plt.savefig(out, dpi=150)
     plt.close()
+    print(f"Gráfico salvo em {out}")
 
 
+# ───────────────────────────── CLI ───────────────────────────────────
 def main() -> None:
-    parser = argparse.ArgumentParser(description='Pipeline de Jurimetria via API pública do CNJ')
-    parser.add_argument('--tribunais', nargs='+', help='Lista de tribunais (ex.: TJCE TJSP).')
-    parser.add_argument('--classe-codigo', dest='classe_codigo', type=int, default=CLASSE_CODIGO)
-    parser.add_argument('--classe', dest='classe_nome', type=str, default=None)
-    parser.add_argument('--de', dest='de', type=str, default=None)
-    parser.add_argument('--ate', dest='ate', type=str, default=None)
-    parser.add_argument('--max-processos', dest='max_processos', type=int, default=None)
-    parser.add_argument('--log-level', dest='log_level',
-                        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
-                        default='INFO')
-    args, _ = parser.parse_known_args()
+    parser = argparse.ArgumentParser(description="Pipeline de Jurimetria via API pública do CNJ")
+    parser.add_argument(
+        "--tribunais",
+        nargs="+",
+        metavar="TJXX",
+        default=DEFAULT_TRIBUNAIS,
+        help="Lista de tribunais (TJSP TJCE …). Padrão: TJCE",
+    )
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--classe-codigo", type=int, help="Código numérico da classe")
+    group.add_argument(
+        "--classe",
+        dest="classe_nome",
+        help='Nome da classe (ex.: "Apelação Cível"). Sobrepõe --classe-codigo',
+    )
+    parser.add_argument(
+        "--de",
+        type=str,
+        help="Data inicial para filtrar processos (formato YYYY-MM-DD)",
+    )
+    parser.add_argument(
+        "--ate",
+        type=str,
+        help="Data final para filtrar processos (formato YYYY-MM-DD)",
+    )
+    parser.add_argument(
+        "--max-processos",
+        type=int,
+        help="Número máximo de processos a serem coletados",
+    )
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        help="Define o nível de log (DEBUG, INFO, WARNING, ERROR, CRITICAL). Padrão: INFO",
+    )
+    args = parser.parse_args()
 
-    logging.basicConfig(level=getattr(logging, args.log_level),
-                        format='[%(levelname)s] %(message)s')
+    set_log_level(args.log_level)
 
-    tribunais = args.tribunais or DEFAULT_TRIBUNAIS
     try:
-        print(f'⏳ Coletando dados para: {", ".join(tribunais)} …')
-        df = build_dataframe(
-            tribunais=tribunais,
-            classe_codigo=args.classe_codigo,
-            classe_nome=args.classe_nome,
-            de=args.de,
-            ate=args.ate,
-            max_processos=args.max_processos,
+        print(
+            f"⏳ Coletando dados para {', '.join(args.tribunais)} "
+            f"(classe={args.classe_nome or args.classe_codigo or CLASSE_CODIGO_DEFAULT}) …"
         )
-    except EnvironmentError as e:
-        print(f'⚠️  {e}')
+        df = build_dataframe(
+            args.tribunais,
+            args.classe_codigo,
+            args.classe_nome,
+            args.de,
+            args.ate,
+            args.max_processos,
+        )
+    except EnvironmentError as err:
+        print(f"⚠️  {err}")
         sys.exit(1)
-    except HTTPError as e:
-        # Se der 400 na API, cai aqui e cria um DataFrame vazio
-        print(f'⚠️  Falha na API CNJ: {e}')
-        df = pd.DataFrame()
 
-    # garantimos sempre persistir o CSV/parquet (mesmo que vazios)
-    print(f'✔️  Total de processos: {len(df):,}')
+    print(f"✔️  Total de processos: {len(df):,}")
     persist_df(df)
+    plot_horario(df)
+
+
+if __name__ == "__main__":
+    main()
