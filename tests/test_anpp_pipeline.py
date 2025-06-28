@@ -13,11 +13,11 @@ from unittest import mock
 
 import pandas as pd
 import matplotlib
+matplotlib.use("Agg")
 
 # Permite importar src/jurimetria_pipeline.py sem instalar como pacote
 import sys
 sys.path.append(str(Path(__file__).resolve().parents[1] / "src"))
-
 from jurimetria_pipeline import (
     tz_utc_to_sp,
     lista_assuntos,

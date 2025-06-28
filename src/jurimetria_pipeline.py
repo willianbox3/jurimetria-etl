@@ -100,7 +100,10 @@ def fetch_raw_hits(
     classe_codigo: Optional[int] = None,
     classe_nome: Optional[str] = None,
     page_size: int = PAGE_SIZE,
+<<<<<<< HEAD
     max_fetch: Optional[int] = None,
+=======
+>>>>>>> 025ea134279f977d093cf1ffae0179c8cd6b6d54
 ) -> Generator[Dict[str, Any], None, None]:
     """Paginação `search_after` sobre o índice público de cada tribunal."""
     headers = get_headers()
@@ -115,6 +118,7 @@ def fetch_raw_hits(
             ],
         }
         search_after: Optional[List[Any]] = None
+<<<<<<< HEAD
         last_cursors = set()
         max_requests = 1000  # safeguard to prevent infinite loops
         request_count = 0
@@ -123,6 +127,9 @@ def fetch_raw_hits(
             if request_count >= max_requests:
                 log.warning(f"Reached max requests limit ({max_requests}), stopping to avoid infinite loop.")
                 return
+=======
+        while True:
+>>>>>>> 025ea134279f977d093cf1ffae0179c8cd6b6d54
             payload = dict(base_payload)
             if search_after:
                 payload["search_after"] = search_after
@@ -147,6 +154,7 @@ def fetch_raw_hits(
             if not hits:
                 return
 
+<<<<<<< HEAD
             for hit in hits:
                 if max_fetch is not None and total_fetched >= max_fetch:
                     log.info(f"Reached max_fetch limit ({max_fetch}), stopping fetch.")
@@ -163,6 +171,13 @@ def fetch_raw_hits(
             last_cursors.add(new_cursor_tuple)
             search_after = new_cursor
             request_count += 1
+=======
+            yield from hits
+            new_cursor = hits[-1]["sort"]
+            if new_cursor == search_after:
+                return
+            search_after = new_cursor
+>>>>>>> 025ea134279f977d093cf1ffae0179c8cd6b6d54
 
     # Try querying by class name first if provided
     if classe_nome:
@@ -205,7 +220,10 @@ def parse_hit(hit: Dict[str, Any], tribunal: str) -> Dict[str, Any]:
 
 from datetime import datetime
 import pytz
+<<<<<<< HEAD
 import pandas as pd
+=======
+>>>>>>> 025ea134279f977d093cf1ffae0179c8cd6b6d54
 
 def build_dataframe(
     tribunais: List[str],
@@ -221,6 +239,7 @@ def build_dataframe(
     de_dt = tz.localize(datetime.strptime(de, "%Y-%m-%d")) if de else None
     ate_dt = tz.localize(datetime.strptime(ate, "%Y-%m-%d")) if ate else None
 
+<<<<<<< HEAD
     # Load municipio code to name mapping
     municipios_df = pd.read_excel("src/municipios_ibge.csv.xls")
     municipios_df = municipios_df.dropna(subset=["CD_MUN"])
@@ -228,6 +247,8 @@ def build_dataframe(
         int(row["CD_MUN"]): row["NM_MUN"] for _, row in municipios_df.iterrows()
     }
 
+=======
+>>>>>>> 025ea134279f977d093cf1ffae0179c8cd6b6d54
     def dentro_do_periodo(data: Optional[pd.Timestamp]) -> bool:
         if data is None:
             return True
@@ -237,26 +258,41 @@ def build_dataframe(
             return False
         return True
 
+<<<<<<< HEAD
     # Set max_fetch to a buffer above max_processos to allow filtering
     max_fetch = max_processos * 3 if max_processos else None
 
     for trib in tribunais:
         registros = []
         for h in fetch_raw_hits(trib, classe_codigo, classe_nome, max_fetch=max_fetch):
+=======
+    for trib in tribunais:
+        registros = []
+        for h in fetch_raw_hits(trib, classe_codigo, classe_nome):
+>>>>>>> 025ea134279f977d093cf1ffae0179c8cd6b6d54
             parsed = parse_hit(h, trib)
             if dentro_do_periodo(parsed.get("data_ajuizamento")):
                 registros.append(parsed)
                 total_processos += 1
+<<<<<<< HEAD
                 log.debug(f"Total processos coletados: {total_processos}")
                 if max_processos and total_processos >= max_processos:
                     log.info(f"Reached max_processos limit ({max_processos}) in build_dataframe, stopping.")
+=======
+                if max_processos and total_processos >= max_processos:
+>>>>>>> 025ea134279f977d093cf1ffae0179c8cd6b6d54
                     break
         if registros:
             frames.append(pd.DataFrame(registros))
         if max_processos and total_processos >= max_processos:
+<<<<<<< HEAD
             log.info(f"Reached max_processos limit ({max_processos}) in build_dataframe, stopping.")
             break
     df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+=======
+            break
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+>>>>>>> 025ea134279f977d093cf1ffae0179c8cd6b6d54
 
     # Map municipio codes to names
     if not df.empty and "municipio" in df.columns:
@@ -264,6 +300,9 @@ def build_dataframe(
 
     return df
 
+
+# ─────────────────────── Persistência & gráfico ──────────────────────
+import json
 
 # ─────────────────────── Persistência & gráfico ──────────────────────
 import json
@@ -325,6 +364,7 @@ def plot_horario(df: pd.DataFrame) -> None:
 
 
 # ───────────────────────────── CLI ───────────────────────────────────
+<<<<<<< HEAD
 def main(args: list[str] | None = None) -> None:
     # Early check for CNJ_API_KEY environment variable
     api_key = os.getenv("CNJ_API_KEY")
@@ -332,6 +372,9 @@ def main(args: list[str] | None = None) -> None:
         print("⚠️  Defina a variável de ambiente CNJ_API_KEY antes de executar o script.")
         sys.exit(1)
 
+=======
+def main() -> None:
+>>>>>>> 025ea134279f977d093cf1ffae0179c8cd6b6d54
     parser = argparse.ArgumentParser(description="Pipeline de Jurimetria via API pública do CNJ")
     parser.add_argument(
         "--tribunais",
@@ -367,6 +410,7 @@ def main(args: list[str] | None = None) -> None:
         default="INFO",
         help="Define o nível de log (DEBUG, INFO, WARNING, ERROR, CRITICAL). Padrão: INFO",
     )
+<<<<<<< HEAD
     parsed_args = parser.parse_args(args)
 
     set_log_level(parsed_args.log_level)
@@ -383,6 +427,24 @@ def main(args: list[str] | None = None) -> None:
             parsed_args.de,
             parsed_args.ate,
             parsed_args.max_processos,
+=======
+    args = parser.parse_args()
+
+    set_log_level(args.log_level)
+
+    try:
+        print(
+            f"⏳ Coletando dados para {', '.join(args.tribunais)} "
+            f"(classe={args.classe_nome or args.classe_codigo or CLASSE_CODIGO_DEFAULT}) …"
+        )
+        df = build_dataframe(
+            args.tribunais,
+            args.classe_codigo,
+            args.classe_nome,
+            args.de,
+            args.ate,
+            args.max_processos,
+>>>>>>> 025ea134279f977d093cf1ffae0179c8cd6b6d54
         )
     except EnvironmentError as err:
         print(f"⚠️  {err}")
