@@ -67,7 +67,9 @@ class TestMain(unittest.TestCase):
     def test_main_handles_missing_api_key(self):
         with mock.patch.dict(os.environ, {}, clear=True):
             with mock.patch("builtins.print") as mocked_print:
-                main()
+                with self.assertRaises(SystemExit) as cm:
+                    main(args=[])
+                self.assertEqual(cm.exception.code, 1)
                 mocked_print.assert_any_call(
                     "⚠️  Defina a variável de ambiente CNJ_API_KEY antes de executar o script."
                 )
@@ -94,7 +96,7 @@ class TestMain(unittest.TestCase):
         }
 
         with mock.patch("jurimetria_pipeline.fetch_raw_hits", return_value=[sample_hit]):
-            df = build_dataframe()
+            df = build_dataframe(tribunais=["TJSP"])
             self.assertEqual(len(df), 1)
             self.assertIn("numero_processo", df.columns)
 
