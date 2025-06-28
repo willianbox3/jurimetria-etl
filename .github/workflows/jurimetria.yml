@@ -17,20 +17,20 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      - name: Run jurimetria pipeline
+            - name: Run jurimetria pipeline
         env:
           CNJ_API_KEY: ${{ secrets.CNJ_API_KEY }}
         run: |
           python src/jurimetria_pipeline.py \
             --tribunais TJCE \
             --de 2023-01-01 \
-            --ate 2023-01-31 \
-            --max-processos 100 \
+            --ate 2023-02-28 \
+            --max-processos 200 \
             --log-level DEBUG
 
-      - name: List files for debugging
+      - name: Listar arquivos criados
         run: |
-          ls -lR dados_jurimetria || echo "No dados_jurimetria directory"
+          ls -lR dados_jurimetria || echo "Diretório não existe"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
