@@ -6,6 +6,7 @@ import sys
 import argparse
 import logging
 from typing import Generator, List, Dict, Any, Optional
+from pathlib import Path
 
 import pandas as pd
 import matplotlib
