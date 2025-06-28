@@ -270,8 +270,7 @@ def main() -> None:
                         format='[%(levelname)s] %(message)s')
 
     tribunais = args.tribunais or DEFAULT_TRIBUNAIS
-
-    try:
+ try:
         print(f'⏳ Coletando dados para: {", ".join(tribunais)} …')
         df = build_dataframe(
             tribunais=tribunais,
@@ -284,16 +283,11 @@ def main() -> None:
     except EnvironmentError as e:
         print(f'⚠️  {e}')
         sys.exit(1)
+    except HTTPError as e:
+        # Se der 400 na API, cai aqui e cria um DataFrame vazio
+        print(f'⚠️  Falha na API CNJ: {e}')
+        df = pd.DataFrame()
 
+    # garantimos sempre persistir o CSV/parquet (mesmo que vazios)
     print(f'✔️  Total de processos: {len(df):,}')
     persist_df(df)
-
-    if not df.empty:
-        assuntos_top = df['assuntos'].explode().value_counts().head()
-        print('\nTop-5 assuntos:\n', assuntos_top, sep='')
-
-    plot_horario(df, args.classe_nome, args.classe_codigo)
-
-
-if __name__ == '__main__':
-    main()
