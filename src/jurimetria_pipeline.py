@@ -104,6 +104,7 @@ def fetch_raw_hits(
     else:
         query = {'match_all': {}}
 
+    # <<< aqui estava “Dict[str, Any]]” com um colchete a mais; corrigido abaixo
     payload_base: Dict[str, Any] = {
         'size': page_size,
         'query': query,
@@ -126,13 +127,14 @@ def fetch_raw_hits(
         else:
             logger.info("Buscando %d processos em %s...", page_size, tribunal)
 
-        resp = requests.post(base_url, headers=headers, json=payload, timeout=60)
-        if resp.status_code == 404:
+        try:
+            resp = requests.post(base_url, headers=headers, json=payload, timeout=60)
+            resp.raise_for_status()
+        except HTTPError as e:
+            # Se a API retornar 400 (ou outro erro de cliente), interrompe este tribunal
+            status = e.response.status_code if e.response is not None else '??'
+            logger.warning(f"API ({tribunal}) devolveu {status}, encerrando coleta deste tribunal.")
             break
-        resp.raise_for_status()
-
-        if logger.isEnabledFor(logging.DEBUG):
-            logger.debug("Response [%d]: %s", resp.status_code, resp.text)
 
         hits = resp.json().get('hits', {}).get('hits', [])
         if not hits:
@@ -158,10 +160,7 @@ def parse_hit(hit: Dict[str, Any], tribunal: str) -> Dict[str, Any]:
     if cod_ibge is not None:
         cod_str = str(cod_ibge)
         if not _mun.empty and cod_str in _mun.index:
-            try:
-                nome_mun = _mun.loc[cod_str, 'nome_municipio']
-            except Exception:
-                nome_mun = None
+            nome_mun = _mun.loc[cod_str, 'nome_municipio']
 
     return {
         'tribunal': tribunal,
@@ -205,9 +204,10 @@ def build_dataframe(
 def persist_df(df: pd.DataFrame) -> None:
     parquet_path = OUT_DIR / 'jurimetria.parquet'
     csv_path = OUT_DIR / 'jurimetria.csv'
+    # mesmo que df esteja vazio, esses dois arquivos serão criados (podendo ser vazios)
     df.to_parquet(parquet_path, compression='zstd', index=False)
     df.to_csv(csv_path, index=False)
-    print(f'Dados salvos em:\n  • {parquet_path}\n  • {csv_path}')
+    print(f'Dados salvos em:\n  • {csv_path}\n  • {parquet_path}')
 
 
 def plot_horario(df: pd.DataFrame, classe_nome: Optional[str], classe_codigo: Optional[int]) -> None:
@@ -229,7 +229,6 @@ def plot_horario(df: pd.DataFrame, classe_nome: Optional[str], classe_codigo: Op
     plt.title(f"Horário de ajuizamento – classe {classe_nome or classe_codigo}")
     plt.xlabel('Hora do dia')
     plt.ylabel('Número de ajuizamentos')
-    plt.xticks(rotation=0)
     plt.grid(axis='y', alpha=0.4)
     plt.tight_layout()
 
@@ -255,11 +254,7 @@ def main() -> None:
     logging.basicConfig(level=getattr(logging, args.log_level),
                         format='[%(levelname)s] %(message)s')
 
-    # se não passou --classe-codigo nem --classe, usar o padrão ANPP
-    if args.classe_codigo is None and args.classe_nome is None:
-        args.classe_codigo = CLASSE_CODIGO
-
-    tribunais = args.tribunais if args.tribunais else DEFAULT_TRIBUNAIS
+    tribunais = args.tribunais or DEFAULT_TRIBUNAIS
 
     try:
         print(f'⏳ Coletando dados para: {", ".join(tribunais)} …')
@@ -274,9 +269,6 @@ def main() -> None:
     except EnvironmentError as e:
         print(f'⚠️  {e}')
         sys.exit(1)
-    except HTTPError as e:
-        print(f'⚠️  Falha na API CNJ: {e}')
-        df = pd.DataFrame()
 
     print(f'✔️  Total de processos: {len(df):,}')
     persist_df(df)
