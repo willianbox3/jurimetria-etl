@@ -100,10 +100,8 @@ def fetch_raw_hits(
     classe_codigo: Optional[int] = None,
     classe_nome: Optional[str] = None,
     page_size: int = PAGE_SIZE,
-<<<<<<< HEAD
     max_fetch: Optional[int] = None,
-=======
->>>>>>> 025ea134279f977d093cf1ffae0179c8cd6b6d54
+    
 ) -> Generator[Dict[str, Any], None, None]:
     """Paginação `search_after` sobre o índice público de cada tribunal."""
     headers = get_headers()
